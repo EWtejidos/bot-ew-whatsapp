@@ -1,0 +1,6 @@
+date,wa_id,product_type,product_name,colors,length_cm,width_cm,description,full_name,deadline,delivery,product_image,payment_proof,status
+26/02/2026 17:10,573107298010,Llavero,Llavero gato,"Rojo, negro",4,3,Que sea lindo,Kelly cervantes,,Calle 33 #11,img/1234337232150867_20260226170930.jpg,,cotizacion
+01/03/2026 11:32,573107298010,X,Girasol,"Rojo,amarillo",12,5,Prueba,Kelly c,,Calle 33,img/1454177146419909_20260301113156.jpg,comprobante/1434605120880084_20260301113301.jpg,comprado
+01/03/2026 12:06,573107298010,Vestido de baño,Deseo un vestido de baño morad,"Morado,balnco",32,22,Ggg,Kellly,,Calle 33,img/1421540052355147_20260301120544.jpg,,cotizacion
+01/03/2026 13:46,573107298010,Prenda de vestir,Falda,Rojo,12,13,Gg,Kelly cervantes,,Carrera 33,img/1279796057348254_20260301134605.jpg,comprobante/1644206606604773_20260301134752.jpg,comprado
+01/03/2026 14:15,573107298010,Amigurumi o peluche,Conejo,Azul,12,12,Quiero una flor azul con tallo verde,Kelly cervantes,,Egjwjdje,img/907342928881945_20260301141436.jpg,comprobante/1618521249273650_20260301141611.jpg,comprado
