@@ -1,9 +1,8 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import check_password_hash
 from .config import load_configurations, configure_logging
-from .views import webhook_blueprint
 import os
 
 # --- INICIALIZACIÓN DE EXTENSIONES ---
@@ -11,15 +10,11 @@ import os
 db = SQLAlchemy()
 # login_manager: El "portero" que vigila quién tiene sesión iniciada
 login_manager = LoginManager()
-
-# --- MODELO DE DATOS ---
-# Define la estructura de la tabla de usuarios en la base de datos
-class User(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
+from .models import User
 
 def create_app():
+    from .views import webhook_blueprint
+
     # Ruta absoluta hacia tu carpeta de archivos web (HTML/CSS/Images)
     base_dir = '/home/ewtejidos/bot/ew_website'
 
@@ -140,5 +135,8 @@ def create_app():
 
     # Registro del Blueprint del bot de WhatsApp
     app.register_blueprint(webhook_blueprint)
+
+    with app.app_context():
+        db.create_all()
 
     return app

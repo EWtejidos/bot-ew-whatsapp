@@ -1,8 +1,10 @@
 import logging
 from flask import Blueprint, request, jsonify, current_app
+from flask_login import login_required
 
 # Importaciones relativas (usando el punto .)
 from .decorators.security import signature_required
+from .models import Order
 from .utils.whatsapp_utils import (
     process_whatsapp_message,
     is_valid_whatsapp_message,)
@@ -60,5 +62,11 @@ def webhook_get():
 def webhook_post():
     return handle_message()
 
+
+@webhook_blueprint.route("/api/admin/recent-orders", methods=["GET"])
+@login_required
+def recent_orders():
+    orders = Order.query.order_by(Order.created_at.desc()).limit(50).all()
+    return jsonify([order.to_dashboard_dict() for order in orders]), 200
 
 

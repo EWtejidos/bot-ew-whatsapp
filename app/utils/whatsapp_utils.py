@@ -3,6 +3,8 @@ import requests
 import os
 import csv
 from datetime import datetime
+from app import db
+from app.models import Order
 from app.services.mood_service import detect_mood, build_mood_reply
 from app.services.precios import calcular_precio
 from app.services.email_service import send_order_email
@@ -64,6 +66,25 @@ def send_text(recipient, text):
 # --------------------------------------------------------------
 
 def save_order(order_data):
+    saved_order = Order(
+        wa_id=order_data.get("wa_id"),
+        product_type=order_data.get("product_type"),
+        product_name=order_data.get("product_name"),
+        colors=order_data.get("colors"),
+        length_cm=order_data.get("length_cm"),
+        width_cm=order_data.get("width_cm"),
+        description=order_data.get("description"),
+        full_name=order_data.get("full_name"),
+        delivery=order_data.get("delivery"),
+        product_image=order_data.get("product_image"),
+        payment_proof=order_data.get("payment_proof"),
+        quote_min=order_data.get("quote_min"),
+        quote_max=order_data.get("quote_max"),
+        advance_payment=order_data.get("advance_payment"),
+        status=order_data.get("status", "cotizacion"),
+    )
+    db.session.add(saved_order)
+    db.session.commit()
 
     file_exists = os.path.isfile(CSV_FILE)
 
@@ -83,6 +104,9 @@ def save_order(order_data):
             "delivery",
             "product_image",
             "payment_proof",
+            "quote_min",
+            "quote_max",
+            "advance_payment",
             "status"
         ])
 
@@ -92,12 +116,26 @@ def save_order(order_data):
         writer.writerow(order_data)
 
     send_order_email("nueva_orden", order_data)
+    return saved_order
 
 
 def mark_order_as_paid(wa_id, payment_proof):
+    target_order = (
+        Order.query.filter_by(wa_id=wa_id, status="cotizacion")
+        .order_by(Order.created_at.desc())
+        .first()
+    )
+
+    if target_order:
+        target_order.payment_proof = payment_proof
+        target_order.payment_received_at = datetime.utcnow()
+        target_order.status = "comprado"
+        db.session.commit()
+
+    updated_order = None
 
     if not os.path.isfile(CSV_FILE):
-        return False
+        return bool(target_order)
 
     with open(CSV_FILE, mode="r", newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
@@ -114,7 +152,7 @@ def mark_order_as_paid(wa_id, payment_proof):
             break
 
     if target_index is None:
-        return False
+        return bool(target_order)
 
     rows[target_index]["payment_proof"] = payment_proof
     rows[target_index]["status"] = "comprado"
@@ -125,8 +163,10 @@ def mark_order_as_paid(wa_id, payment_proof):
         writer.writeheader()
         writer.writerows(rows)
 
-    send_order_email("orden_actualizada_comprado", updated_order)
-    return True
+    if updated_order:
+        send_order_email("orden_actualizada_comprado", updated_order)
+
+    return bool(target_order or updated_order)
 
 # --------------------------------------------------------------
 # Descargar imagen
@@ -283,9 +323,8 @@ def process_whatsapp_message(body):
         orders_temp[wa_id]["delivery"] = message_text
         orders_temp[wa_id]["date"] = datetime.now().strftime("%d/%m/%Y %H:%M")
         orders_temp[wa_id]["wa_id"] = wa_id
+        orders_temp[wa_id]["payment_proof"] = ""
         orders_temp[wa_id]["status"] = "cotizacion"
-
-        save_order(orders_temp[wa_id])
 
         cotizacion = calcular_precio(
             tipo=orders_temp[wa_id].get("product_type"),
@@ -293,6 +332,11 @@ def process_whatsapp_message(body):
             ancho=orders_temp[wa_id].get("width_cm"),
             archivo_historico=CSV_FILE,
         )
+        orders_temp[wa_id]["quote_min"] = cotizacion["precio_min"]
+        orders_temp[wa_id]["quote_max"] = cotizacion["precio_max"]
+        orders_temp[wa_id]["advance_payment"] = cotizacion["pago_30"]
+
+        save_order(orders_temp[wa_id])
 
         send_text(
             wa_id,
