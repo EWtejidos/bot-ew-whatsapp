@@ -4,7 +4,7 @@ from flask_login import login_required
 
 # Importaciones relativas (usando el punto .)
 from .decorators.security import signature_required
-from .models import Order
+from .models import Customer, Order
 from .utils.whatsapp_utils import (
     process_whatsapp_message,
     is_valid_whatsapp_message,)
@@ -70,3 +70,15 @@ def recent_orders():
     return jsonify([order.to_dashboard_dict() for order in orders]), 200
 
 
+@webhook_blueprint.route("/api/admin/customers", methods=["GET"])
+@login_required
+def customers():
+    customers_list = Customer.query.order_by(Customer.created_at.desc()).limit(100).all()
+    return jsonify([customer.to_base_dict() for customer in customers_list]), 200
+
+
+@webhook_blueprint.route("/api/admin/orders", methods=["GET"])
+@login_required
+def admin_orders():
+    orders = Order.query.order_by(Order.created_at.desc()).all()
+    return jsonify([order.to_admin_dict() for order in orders]), 200

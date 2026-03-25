@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import check_password_hash
 from .config import load_configurations, configure_logging
+from sqlalchemy import text
 import os
 
 # --- INICIALIZACIÓN DE EXTENSIONES ---
@@ -138,5 +139,51 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        ensure_runtime_schema()
 
     return app
+
+
+def ensure_runtime_schema():
+    inspector = db.inspect(db.engine)
+
+    if not inspector.has_table("customer"):
+        db.create_all()
+
+    if not inspector.has_table("order"):
+        db.create_all()
+        return
+
+    order_columns = {column["name"] for column in inspector.get_columns("order")}
+    customer_columns = (
+        {column["name"] for column in inspector.get_columns("customer")}
+        if inspector.has_table("customer")
+        else set()
+    )
+
+    statements = []
+
+    if "order_code" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN order_code VARCHAR(20)")
+    if "customer_id" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN customer_id INTEGER")
+    if "quote_min" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN quote_min INTEGER")
+    if "quote_max" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN quote_max INTEGER")
+    if "advance_payment" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN advance_payment INTEGER")
+    if "payment_received_at" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN payment_received_at DATETIME")
+
+    if inspector.has_table("customer"):
+        if "created_at" not in customer_columns:
+            statements.append("ALTER TABLE customer ADD COLUMN created_at DATETIME")
+        if "updated_at" not in customer_columns:
+            statements.append("ALTER TABLE customer ADD COLUMN updated_at DATETIME")
+
+    for statement in statements:
+        db.session.execute(text(statement))
+
+    if statements:
+        db.session.commit()

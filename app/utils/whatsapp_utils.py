@@ -4,7 +4,7 @@ import os
 import csv
 from datetime import datetime
 from app import db
-from app.models import Order
+from app.models import Customer, Order
 from app.services.mood_service import detect_mood, build_mood_reply
 from app.services.precios import calcular_precio
 from app.services.email_service import send_order_email
@@ -26,6 +26,32 @@ os.makedirs("comprobante", exist_ok=True)
 
 user_states = {}
 orders_temp = {}
+
+
+def get_customer_by_wa_id(wa_id):
+    return Customer.query.filter_by(wa_id=wa_id).first()
+
+
+def save_customer(wa_id, full_name):
+    normalized_name = (full_name or "").strip()
+    customer = get_customer_by_wa_id(wa_id)
+
+    if customer:
+        if normalized_name and customer.full_name != normalized_name:
+            customer.full_name = normalized_name
+            db.session.commit()
+        return customer
+
+    customer = Customer(wa_id=wa_id, full_name=normalized_name)
+    db.session.add(customer)
+    db.session.commit()
+    return customer
+
+
+def generate_order_code():
+    last_order = Order.query.order_by(Order.id.desc()).first()
+    next_number = 1 if not last_order else last_order.id + 1
+    return f"EW-{next_number:06d}"
 
 
 def send_main_menu(wa_id):
@@ -66,7 +92,13 @@ def send_text(recipient, text):
 # --------------------------------------------------------------
 
 def save_order(order_data):
+    customer = get_customer_by_wa_id(order_data.get("wa_id"))
+    if not customer:
+        customer = save_customer(order_data.get("wa_id"), order_data.get("full_name"))
+
     saved_order = Order(
+        order_code=generate_order_code(),
+        customer_id=customer.id,
         wa_id=order_data.get("wa_id"),
         product_type=order_data.get("product_type"),
         product_name=order_data.get("product_name"),
@@ -91,6 +123,7 @@ def save_order(order_data):
     with open(CSV_FILE, mode="a", newline="", encoding="utf-8") as file:
 
         writer = csv.DictWriter(file, fieldnames=[
+            "order_code",
             "date",
             "wa_id",
             "product_type",
@@ -113,6 +146,7 @@ def save_order(order_data):
         if not file_exists:
             writer.writeheader()
 
+        order_data["order_code"] = saved_order.order_code
         writer.writerow(order_data)
 
     send_order_email("nueva_orden", order_data)
@@ -245,7 +279,10 @@ def process_whatsapp_message(body):
     # ---------------- OPCION 1 ----------------
 
     if state == "menu_choice" and message_text == "1":
+        customer = get_customer_by_wa_id(wa_id)
         orders_temp[wa_id] = {}
+        if customer:
+            orders_temp[wa_id]["full_name"] = customer.full_name
         send_text(
             wa_id,
             "¿Qué tipo de tejido deseas solicitar?\n"
@@ -309,12 +346,19 @@ def process_whatsapp_message(body):
 
     if state == "description":
         orders_temp[wa_id]["description"] = message_text
-        send_text(wa_id, "Ingresa tu nombre completo:")
-        user_states[wa_id] = "full_name"
+        customer = get_customer_by_wa_id(wa_id)
+        if customer and customer.full_name:
+            orders_temp[wa_id]["full_name"] = customer.full_name
+            send_text(wa_id, "Entrega (Dirección o Punto de recogida):")
+            user_states[wa_id] = "delivery"
+        else:
+            send_text(wa_id, "Ingresa tu nombre completo:")
+            user_states[wa_id] = "full_name"
         return
 
     if state == "full_name":
         orders_temp[wa_id]["full_name"] = message_text
+        save_customer(wa_id, message_text)
         send_text(wa_id, "Entrega (Dirección o Punto de recogida):")
         user_states[wa_id] = "delivery"
         return
@@ -325,6 +369,10 @@ def process_whatsapp_message(body):
         orders_temp[wa_id]["wa_id"] = wa_id
         orders_temp[wa_id]["payment_proof"] = ""
         orders_temp[wa_id]["status"] = "cotizacion"
+        if not orders_temp[wa_id].get("full_name"):
+            customer = get_customer_by_wa_id(wa_id)
+            if customer:
+                orders_temp[wa_id]["full_name"] = customer.full_name
 
         cotizacion = calcular_precio(
             tipo=orders_temp[wa_id].get("product_type"),
@@ -350,8 +398,11 @@ def process_whatsapp_message(body):
 
     if state == "waiting_payment" and media_id:
         proof_path = download_media(media_id, "comprobante")
-        mark_order_as_paid(wa_id, proof_path)
-        send_text(wa_id, "✅ Orden enlistada exitosamente. \n Una persona de nuestro equipo se comunicará contigo en menos de 48 horas para confirmar detalles y tiempos de entrega.")
+        order_updated = mark_order_as_paid(wa_id, proof_path)
+        if order_updated:
+            send_text(wa_id, "✅ Orden enlistada exitosamente. \n Una persona de nuestro equipo se comunicará contigo en menos de 48 horas para confirmar detalles y tiempos de entrega.")
+        else:
+            send_text(wa_id, "Recibimos tu comprobante, pero no logramos enlazarlo a una orden activa. Nuestro equipo lo revisará manualmente.")
         user_states[wa_id] = "menu"
         return
 
