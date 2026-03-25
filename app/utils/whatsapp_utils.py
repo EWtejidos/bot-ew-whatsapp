@@ -1,6 +1,4 @@
-﻿import logging
 from flask import current_app
-import json
 import requests
 import os
 import csv

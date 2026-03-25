@@ -1,7 +1,12 @@
 import csv
 import os
 
-# ---- PRECIOS MINIMOS POR TIPO ----
+# ---- CONFIGURACIÓN DE RUTAS ----
+# Usamos la ruta absoluta para que PythonAnywhere no se pierda
+BASE_DIR = "/home/ewtejidos/bot/bot-ew-whatsapp"
+# Por defecto buscamos el historial en la carpeta 'ordenes'
+DEFAULT_CSV_PATH = os.path.join(BASE_DIR, "ordenes", "precios_referencias.csv")
+
 PRECIOS_MINIMOS = {
     "Prenda de vestir": 45000,
     "Vestido de baño": 40000,
@@ -9,7 +14,6 @@ PRECIOS_MINIMOS = {
     "Llavero o flores": 6000,
 }
 
-# Multiplicadores por tipo
 MULTIPLICADORES = {
     "Prenda de vestir": 15,
     "Vestido de baño": 18,
@@ -17,13 +21,24 @@ MULTIPLICADORES = {
     "Llavero o flores": 8,
 }
 
-
 def _to_float(value, default=0.0):
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
 
+def _cargar_historico_csv(archivo_historico):
+    # Si no pasan ruta, usamos la de por defecto
+    ruta = archivo_historico or DEFAULT_CSV_PATH
+
+    if not os.path.isfile(ruta):
+        return []
+
+    try:
+        with open(ruta, mode="r", newline="", encoding="utf-8") as file:
+            return list(csv.DictReader(file))
+    except Exception:
+        return []
 
 def _buscar_similar(rows, tipo, largo, ancho):
     candidatos = [row for row in rows if row.get("product_type") == tipo]
@@ -31,43 +46,38 @@ def _buscar_similar(rows, tipo, largo, ancho):
         return None
 
     def distancia(row):
-        return abs(_to_float(row.get("length_cm")) - largo) + abs(
-            _to_float(row.get("width_cm")) - ancho
-        )
+        # Comparamos qué tan cerca están las medidas
+        d_largo = abs(_to_float(row.get("length_cm")) - largo)
+        d_ancho = abs(_to_float(row.get("width_cm")) - ancho)
+        return d_largo + d_ancho
 
     return min(candidatos, key=distancia)
 
-
-def _cargar_historico_csv(archivo_historico):
-    if not archivo_historico or not os.path.isfile(archivo_historico):
-        return []
-
-    with open(archivo_historico, mode="r", newline="", encoding="utf-8") as file:
-        reader = csv.DictReader(file)
-        return list(reader)
-
-
 def calcular_precio(tipo, largo, ancho, archivo_historico=None):
     if tipo not in PRECIOS_MINIMOS:
-        raise ValueError("Tipo no valido")
+        return { "error": "Tipo no válido" }
 
     largo = _to_float(largo)
     ancho = _to_float(ancho)
 
     precio_minimo_tipo = PRECIOS_MINIMOS[tipo]
     multiplicador = MULTIPLICADORES[tipo]
-    incremento = largo * ancho * multiplicador
+
+    # El incremento depende del área del tejido
+    incremento = (largo * ancho) * multiplicador
 
     historico = _cargar_historico_csv(archivo_historico)
     producto_similar = _buscar_similar(historico, tipo, largo, ancho)
 
     precio_base = precio_minimo_tipo
-    fuente = "Solo minimo por tipo (sin historico)"
+    fuente = "Cálculo base (sin histórico)"
 
     if producto_similar:
+        # IMPORTANTE: Asegúrate que en tu CSV la columna se llame 'precio_final'
         precio_historico = _to_float(producto_similar.get("precio_final"))
-        precio_base = max(precio_minimo_tipo, precio_historico)
-        fuente = "Historico + minimo por tipo"
+        if precio_historico > 0:
+            precio_base = max(precio_minimo_tipo, precio_historico)
+            fuente = "Basado en historial"
 
     precio_min = int(round(precio_base))
     precio_max = int(round(precio_base + incremento))

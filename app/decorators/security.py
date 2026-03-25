@@ -1,38 +1,38 @@
-from functools import wraps
-from flask import current_app, jsonify, request
-import logging
+import functools
 import hashlib
 import hmac
-
+import logging
+from flask import request, jsonify, current_app
 
 def validate_signature(payload, signature):
-    """
-    Validate the incoming payload's signature against our expected signature
-    """
-    # Use the App Secret to hash the payload
-    expected_signature = hmac.new(
-        bytes(current_app.config["APP_SECRET"], "latin-1"),
-        msg=payload.encode("utf-8"),
-        digestmod=hashlib.sha256,
+    # Lee el secreto que pusiste en el archivo WSGI /var/www/...
+    app_secret = current_app.config.get("APP_SECRET")
+
+    if not app_secret:
+        logging.error("ERROR: APP_SECRET no encontrado en la configuración.")
+        return False
+
+    if not signature:
+        return False
+
+    sha_name, signature_hash = signature.split('=')
+    if sha_name != 'sha256':
+        return False
+
+    expected_hash = hmac.new(
+        app_secret.encode('utf-8'),
+        payload,
+        hashlib.sha256
     ).hexdigest()
 
-    # Check if the signature matches
-    return hmac.compare_digest(expected_signature, signature)
-
+    return hmac.compare_digest(signature_hash, expected_hash)
 
 def signature_required(f):
-    """
-    Decorator to ensure that the incoming requests to our webhook are valid and signed with the correct signature.
-    """
-
-    @wraps(f)
+    @functools.wraps(f)
     def decorated_function(*args, **kwargs):
-        signature = request.headers.get("X-Hub-Signature-256", "")[
-            7:
-        ]  # Removing 'sha256='
-        if not validate_signature(request.data.decode("utf-8"), signature):
-            logging.info("Signature verification failed!")
+        signature = request.headers.get("X-Hub-Signature-256")
+        if not signature or not validate_signature(request.data, signature):
+            logging.info("Firma de Meta inválida o ausente.")
             return jsonify({"status": "error", "message": "Invalid signature"}), 403
         return f(*args, **kwargs)
-
     return decorated_function
