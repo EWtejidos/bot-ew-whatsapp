@@ -2,6 +2,7 @@ from flask import current_app
 import requests
 import os
 import csv
+import secrets
 from datetime import datetime
 from app import db
 from app.models import Customer, Order
@@ -54,6 +55,13 @@ def generate_order_code():
     return f"EW-{next_number:06d}"
 
 
+def generate_unique_order_id():
+    while True:
+        candidate = f"ID-{secrets.token_hex(4).upper()}"
+        if not Order.query.filter_by(id_orden=candidate).first():
+            return candidate
+
+
 def send_main_menu(wa_id):
     send_text(
         wa_id,
@@ -96,9 +104,16 @@ def save_order(order_data):
     if not customer:
         customer = save_customer(order_data.get("wa_id"), order_data.get("full_name"))
 
+    order_date = order_data.get("date") or datetime.now().strftime("%d/%m/%Y %H:%M")
+    deadline = order_data.get("deadline") or ""
+    order_data["date"] = order_date
+    order_data["deadline"] = deadline
+
     saved_order = Order(
+        id_orden=generate_unique_order_id(),
         order_code=generate_order_code(),
         customer_id=customer.id,
+        date=order_date,
         wa_id=order_data.get("wa_id"),
         product_type=order_data.get("product_type"),
         product_name=order_data.get("product_name"),
@@ -108,6 +123,7 @@ def save_order(order_data):
         description=order_data.get("description"),
         full_name=order_data.get("full_name"),
         delivery=order_data.get("delivery"),
+        deadline=deadline,
         product_image=order_data.get("product_image"),
         payment_proof=order_data.get("payment_proof"),
         quote_min=order_data.get("quote_min"),
@@ -123,6 +139,7 @@ def save_order(order_data):
     with open(CSV_FILE, mode="a", newline="", encoding="utf-8") as file:
 
         writer = csv.DictWriter(file, fieldnames=[
+            "id_orden",
             "order_code",
             "date",
             "wa_id",
@@ -146,6 +163,7 @@ def save_order(order_data):
         if not file_exists:
             writer.writeheader()
 
+        order_data["id_orden"] = saved_order.id_orden
         order_data["order_code"] = saved_order.order_code
         writer.writerow(order_data)
 
@@ -218,12 +236,16 @@ def download_media(media_id, folder):
 
     media_response = requests.get(media_url, headers=headers)
 
-    filename = f"{folder}/{media_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+    static_root = current_app.static_folder or BASE_DIR
+    target_folder = os.path.join(static_root, folder)
+    os.makedirs(target_folder, exist_ok=True)
+    filename_only = f"{media_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+    absolute_filename = os.path.join(target_folder, filename_only)
 
-    with open(filename, "wb") as f:
+    with open(absolute_filename, "wb") as f:
         f.write(media_response.content)
 
-    return filename
+    return f"{folder}/{filename_only}".replace("\\", "/")
 
 # --------------------------------------------------------------
 # Procesar mensaje principal
@@ -366,6 +388,7 @@ def process_whatsapp_message(body):
     if state == "delivery":
         orders_temp[wa_id]["delivery"] = message_text
         orders_temp[wa_id]["date"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+        orders_temp[wa_id]["deadline"] = orders_temp[wa_id].get("deadline", "")
         orders_temp[wa_id]["wa_id"] = wa_id
         orders_temp[wa_id]["payment_proof"] = ""
         orders_temp[wa_id]["status"] = "cotizacion"

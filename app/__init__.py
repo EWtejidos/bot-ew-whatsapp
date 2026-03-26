@@ -5,6 +5,7 @@ from werkzeug.security import check_password_hash
 from .config import load_configurations, configure_logging
 from sqlalchemy import text
 import os
+import secrets
 
 # --- INICIALIZACIÓN DE EXTENSIONES ---
 # db: El motor que conecta Flask con tu archivo usuarios.db
@@ -165,8 +166,14 @@ def ensure_runtime_schema():
 
     if "order_code" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN order_code VARCHAR(20)")
+    if "id_orden" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN id_orden VARCHAR(24)")
     if "customer_id" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN customer_id INTEGER")
+    if "date" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN date VARCHAR(20)")
+    if "deadline" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN deadline VARCHAR(80)")
     if "quote_min" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN quote_min INTEGER")
     if "quote_max" not in order_columns:
@@ -187,3 +194,25 @@ def ensure_runtime_schema():
 
     if statements:
         db.session.commit()
+
+    if inspector.has_table("order"):
+        rows_without_order_id = db.session.execute(
+            text("SELECT id FROM \"order\" WHERE id_orden IS NULL OR TRIM(id_orden) = ''")
+        ).fetchall()
+        for row in rows_without_order_id:
+            db.session.execute(
+                text("UPDATE \"order\" SET id_orden = :id_orden WHERE id = :id"),
+                {"id_orden": f"ID-{row.id:06d}-{secrets.token_hex(2).upper()}", "id": row.id},
+            )
+
+        rows_without_date = db.session.execute(
+            text("SELECT id FROM \"order\" WHERE date IS NULL OR TRIM(date) = ''")
+        ).fetchall()
+        for row in rows_without_date:
+            db.session.execute(
+                text("UPDATE \"order\" SET date = strftime('%d/%m/%Y %H:%M', created_at) WHERE id = :id"),
+                {"id": row.id},
+            )
+
+        if rows_without_order_id or rows_without_date:
+            db.session.commit()
