@@ -105,6 +105,8 @@ class Order(db.Model):
     deadline = db.Column(db.String(80), nullable=True)
     # Ruta local de la imagen del producto enviada por WhatsApp.
     product_image = db.Column(db.String(255), nullable=True)
+    # Ruta local de la referencia cargada manualmente desde el panel admin.
+    reference_image = db.Column(db.String(255), nullable=True)
     # Ruta local del comprobante de pago.
     payment_proof = db.Column(db.String(255), nullable=True)
     # Rango de cotizacion calculado.
@@ -139,6 +141,7 @@ class Order(db.Model):
             "description": self.description,
             "deadline": self.deadline,
             "product_image": self.product_image,
+            "reference_image": self.reference_image,
         }
 
     # Diccionario para panel administrativo con campos extra.
@@ -163,6 +166,7 @@ class Order(db.Model):
             "deadline": self.deadline,
             "description": self.description,
             "product_image": self.product_image,
+            "reference_image": self.reference_image,
             "payment_proof": self.payment_proof,
             "weaver": "Sin asignar",
             "assigned": False,

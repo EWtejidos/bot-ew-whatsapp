@@ -122,7 +122,7 @@ def upload_reference_image():
         return jsonify({"error": "No se encontro la orden solicitada."}), 404
 
     try:
-        order.product_image = save_reference_image(reference_image, order.id)
+        order.reference_image = save_reference_image(reference_image, order.id)
         db.session.commit()
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
@@ -154,7 +154,7 @@ def upload_reference_images():
             if order is None:
                 raise ValueError(f"La orden {raw_order_id} no existe.")
 
-            order.product_image = save_reference_image(reference_image, order.id)
+            order.reference_image = save_reference_image(reference_image, order.id)
             updated_orders.append(order)
 
         db.session.commit()

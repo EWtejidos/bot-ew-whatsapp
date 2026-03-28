@@ -182,6 +182,8 @@ def ensure_runtime_schema():
         statements.append("ALTER TABLE \"order\" ADD COLUMN advance_payment INTEGER")
     if "payment_received_at" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN payment_received_at DATETIME")
+    if "reference_image" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN reference_image VARCHAR(255)")
 
     if inspector.has_table("customer"):
         if "created_at" not in customer_columns:
