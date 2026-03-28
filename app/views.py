@@ -12,8 +12,7 @@ from .decorators.security import signature_required
 from .models import Customer, Order
 from .utils.whatsapp_utils import (
     process_whatsapp_message,
-    is_valid_whatsapp_message,
-    send_text,)
+    is_valid_whatsapp_message,)
 
 webhook_blueprint = Blueprint("webhook", __name__)
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -235,13 +234,7 @@ def reject_anticipo_for_order(pedido_id):
     if order is None:
         return jsonify({"error": "No se encontro la orden solicitada."}), 404
 
-    payload = request.get_json(silent=True) or {}
-    message = (payload.get("message") or "").strip()
-    if not message:
-        return jsonify({"error": "Debes enviar el mensaje de rechazo."}), 400
-
     try:
-        send_text(order.wa_id, message)
         order.status = "rechazado"
         db.session.commit()
     except Exception as error:
