@@ -19,7 +19,7 @@ ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
 def save_reference_image(file_storage, order_id):
-    # Guarda la referencia manual en una carpeta publica del sitio.
+    # Guarda la referencia manual en una carpeta estatica publica del sitio.
     filename = secure_filename(file_storage.filename or "")
     extension = os.path.splitext(filename)[1].lower()
 
@@ -27,14 +27,14 @@ def save_reference_image(file_storage, order_id):
         raise ValueError("Formato de imagen no permitido.")
 
     static_root = current_app.static_folder or current_app.root_path
-    target_folder = os.path.join(static_root, "uploads", "referencias")
+    target_folder = os.path.join(static_root, "img", "referencias")
     os.makedirs(target_folder, exist_ok=True)
 
     unique_name = f"order_{order_id}_{uuid.uuid4().hex[:10]}{extension}"
     absolute_path = os.path.join(target_folder, unique_name)
     file_storage.save(absolute_path)
 
-    return f"uploads/referencias/{unique_name}".replace("\\", "/")
+    return f"img/referencias/{unique_name}".replace("\\", "/")
 
 def handle_message():
     """
@@ -134,6 +134,34 @@ def upload_reference_image():
         return jsonify({"error": f"No fue posible guardar la imagen: {error}"}), 500
 
     return jsonify(order.to_admin_dict()), 200
+
+
+@webhook_blueprint.route("/api/pedidos/subir-referencia/<int:pedido_id>", methods=["POST"])
+@webhook_blueprint.route("/api/upload-reference/<int:pedido_id>", methods=["POST"])
+@login_required
+def upload_reference_image_for_order(pedido_id):
+    # Ruta explicita por pedido para que el frontend suba una imagen y la persista.
+    reference_image = request.files.get("foto")
+
+    if reference_image is None:
+        return jsonify({"error": "Debes enviar una imagen en el campo foto."}), 400
+
+    order = Order.query.get(pedido_id)
+    if order is None:
+        return jsonify({"error": "No se encontro la orden solicitada."}), 404
+
+    try:
+        saved_path = save_reference_image(reference_image, order.id)
+        order.reference_image = saved_path
+        db.session.commit()
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        logging.exception("No fue posible guardar la referencia del pedido %s", pedido_id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible guardar la imagen: {error}"}), 500
+
+    return jsonify({"status": "success", "url": saved_path, "order": order.to_admin_dict()}), 200
 
 
 @webhook_blueprint.route("/api/admin/orders/reference-images", methods=["POST"])
