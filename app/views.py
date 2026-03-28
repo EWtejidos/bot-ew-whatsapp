@@ -19,6 +19,7 @@ ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
 def save_reference_image(file_storage, order_id):
+    # Guarda la referencia manual en una carpeta publica del sitio.
     filename = secure_filename(file_storage.filename or "")
     extension = os.path.splitext(filename)[1].lower()
 
@@ -111,6 +112,7 @@ def admin_orders():
 @webhook_blueprint.route("/api/admin/orders/reference-image", methods=["POST"])
 @login_required
 def upload_reference_image():
+    # Endpoint para el boton por fila de la columna Referencia.
     order_id = request.form.get("order_id", type=int)
     reference_image = request.files.get("reference_image")
 
@@ -137,6 +139,7 @@ def upload_reference_image():
 @webhook_blueprint.route("/api/admin/orders/reference-images", methods=["POST"])
 @login_required
 def upload_reference_images():
+    # Endpoint para la carga multiple desde el boton superior del panel.
     order_ids = request.form.getlist("order_ids")
     reference_images = request.files.getlist("reference_images")
 

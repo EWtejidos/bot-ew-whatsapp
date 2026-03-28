@@ -182,6 +182,7 @@ def ensure_runtime_schema():
         statements.append("ALTER TABLE \"order\" ADD COLUMN advance_payment INTEGER")
     if "payment_received_at" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN payment_received_at DATETIME")
+    # La referencia del panel admin vive en una columna distinta a product_image.
     if "reference_image" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN reference_image VARCHAR(255)")
 

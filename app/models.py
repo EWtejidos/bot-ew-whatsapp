@@ -141,11 +141,13 @@ class Order(db.Model):
             "description": self.description,
             "deadline": self.deadline,
             "product_image": self.product_image,
+            # Se expone aparte para no mezclarla con la imagen original del pedido.
             "reference_image": self.reference_image,
         }
 
     # Diccionario para panel administrativo con campos extra.
     def to_admin_dict(self):
+        # El panel admin necesita ambas imagenes: la del pedido y la referencia manual.
         customer_name = self.customer.full_name if self.customer else (self.full_name or "Cliente sin nombre")
         return {
             "id": self.id,
