@@ -1,8 +1,13 @@
 import logging
+import os
+import uuid
+
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required
+from werkzeug.utils import secure_filename
 
 # Importaciones relativas (usando el punto .)
+from app import db
 from .decorators.security import signature_required
 from .models import Customer, Order
 from .utils.whatsapp_utils import (
@@ -10,6 +15,25 @@ from .utils.whatsapp_utils import (
     is_valid_whatsapp_message,)
 
 webhook_blueprint = Blueprint("webhook", __name__)
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+
+def save_reference_image(file_storage, order_id):
+    filename = secure_filename(file_storage.filename or "")
+    extension = os.path.splitext(filename)[1].lower()
+
+    if extension not in ALLOWED_IMAGE_EXTENSIONS:
+        raise ValueError("Formato de imagen no permitido.")
+
+    static_root = current_app.static_folder or current_app.root_path
+    target_folder = os.path.join(static_root, "uploads", "referencias")
+    os.makedirs(target_folder, exist_ok=True)
+
+    unique_name = f"order_{order_id}_{uuid.uuid4().hex[:10]}{extension}"
+    absolute_path = os.path.join(target_folder, unique_name)
+    file_storage.save(absolute_path)
+
+    return f"uploads/referencias/{unique_name}".replace("\\", "/")
 
 def handle_message():
     """
@@ -82,3 +106,64 @@ def customers():
 def admin_orders():
     orders = Order.query.order_by(Order.created_at.desc()).all()
     return jsonify([order.to_admin_dict() for order in orders]), 200
+
+
+@webhook_blueprint.route("/api/admin/orders/reference-image", methods=["POST"])
+@login_required
+def upload_reference_image():
+    order_id = request.form.get("order_id", type=int)
+    reference_image = request.files.get("reference_image")
+
+    if not order_id or reference_image is None:
+        return jsonify({"error": "Debes enviar la orden y la imagen de referencia."}), 400
+
+    order = Order.query.get(order_id)
+    if order is None:
+        return jsonify({"error": "No se encontro la orden solicitada."}), 404
+
+    try:
+        order.product_image = save_reference_image(reference_image, order.id)
+        db.session.commit()
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        logging.exception("No fue posible guardar la referencia de la orden %s", order.id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible guardar la imagen: {error}"}), 500
+
+    return jsonify(order.to_admin_dict()), 200
+
+
+@webhook_blueprint.route("/api/admin/orders/reference-images", methods=["POST"])
+@login_required
+def upload_reference_images():
+    order_ids = request.form.getlist("order_ids")
+    reference_images = request.files.getlist("reference_images")
+
+    if not order_ids or not reference_images:
+        return jsonify({"error": "Debes enviar ordenes e imagenes para la carga masiva."}), 400
+
+    if len(order_ids) != len(reference_images):
+        return jsonify({"error": "La cantidad de ordenes debe coincidir con la cantidad de imagenes."}), 400
+
+    updated_orders = []
+
+    try:
+        for raw_order_id, reference_image in zip(order_ids, reference_images):
+            order = Order.query.get(int(raw_order_id))
+            if order is None:
+                raise ValueError(f"La orden {raw_order_id} no existe.")
+
+            order.product_image = save_reference_image(reference_image, order.id)
+            updated_orders.append(order)
+
+        db.session.commit()
+    except ValueError as error:
+        db.session.rollback()
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        logging.exception("No fue posible guardar la carga masiva de referencias")
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible guardar las imagenes: {error}"}), 500
+
+    return jsonify([order.to_admin_dict() for order in updated_orders]), 200
