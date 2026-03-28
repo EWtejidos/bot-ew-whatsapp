@@ -62,6 +62,29 @@ def generate_unique_order_id():
             return candidate
 
 
+def normalize_order_token(raw_value):
+    return (raw_value or "").strip().upper()
+
+
+def find_order_for_retry(wa_id, raw_order_token):
+    token = normalize_order_token(raw_order_token)
+    if not token:
+        return None
+
+    return (
+        Order.query.filter(
+            Order.wa_id == wa_id,
+            Order.status.in_(["rechazado", "anticipo_pendiente", "cotizacion"]),
+            db.or_(
+                Order.id_orden == token,
+                Order.order_code == token,
+            ),
+        )
+        .order_by(Order.created_at.desc())
+        .first()
+    )
+
+
 def send_main_menu(wa_id):
     send_text(
         wa_id,
@@ -220,6 +243,45 @@ def mark_order_as_paid(wa_id, payment_proof):
 
     return bool(target_order or updated_order)
 
+
+def mark_specific_order_as_paid(order, payment_proof):
+    if not order:
+        return False
+
+    order.payment_proof = payment_proof
+    order.payment_received_at = datetime.utcnow()
+    order.status = "anticipo_pendiente"
+    db.session.commit()
+    return True
+
+
+def sync_order_status_to_csv(order, payment_proof):
+    if not order or not os.path.isfile(CSV_FILE):
+        return
+
+    with open(CSV_FILE, mode="r", newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        rows = list(reader)
+        fieldnames = reader.fieldnames
+
+    if not fieldnames:
+        return
+
+    updated = False
+    for row in rows:
+        if row.get("id_orden") == order.id_orden or row.get("order_code") == order.order_code:
+            row["payment_proof"] = payment_proof
+            row["status"] = "anticipo_pendiente"
+            updated = True
+
+    if not updated:
+        return
+
+    with open(CSV_FILE, mode="w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
 # --------------------------------------------------------------
 # Descargar imagen
 # --------------------------------------------------------------
@@ -271,6 +333,28 @@ def process_whatsapp_message(body):
     if message_text and message_text.strip().lower() == "menu":
         send_main_menu(wa_id)
         user_states[wa_id] = "menu_choice"
+        return
+
+    normalized_text = (message_text or "").strip()
+    normalized_lower = normalized_text.lower()
+
+    if normalized_lower.startswith("anticipo+"):
+        order_token = normalized_text.split("+", 1)[1].strip()
+        target_order = find_order_for_retry(wa_id, order_token)
+        if target_order:
+            orders_temp.setdefault(wa_id, {})
+            orders_temp[wa_id]["retry_order_db_id"] = target_order.id
+            orders_temp[wa_id]["retry_order_code"] = target_order.order_code
+            user_states[wa_id] = "waiting_payment_retry"
+            send_text(
+                wa_id,
+                f"Perfecto. Ya identifique la orden {target_order.order_code}. Ahora envia nuevamente la foto del anticipo para revisarla otra vez."
+            )
+        else:
+            send_text(
+                wa_id,
+                "No encontre una orden pendiente de revalidacion con ese identificador. Escribe anticipo+el id de tu orden exactamente como aparece en el mensaje."
+            )
         return
 
     # ---------------- MENU ----------------
@@ -426,6 +510,21 @@ def process_whatsapp_message(body):
             send_text(wa_id, "✅ Recibimos tu anticipo. \n Ahora quedara en validacion administrativa y una persona de nuestro equipo se comunicara contigo en menos de 48 horas para confirmar detalles y tiempos de entrega.")
         else:
             send_text(wa_id, "Recibimos tu comprobante, pero no logramos enlazarlo a una orden activa. Nuestro equipo lo revisará manualmente.")
+        user_states[wa_id] = "menu"
+        return
+
+    if state == "waiting_payment_retry" and media_id:
+        retry_order_id = orders_temp.get(wa_id, {}).get("retry_order_db_id")
+        target_order = Order.query.get(retry_order_id) if retry_order_id else None
+        proof_path = download_media(media_id, "comprobante")
+        order_updated = mark_specific_order_as_paid(target_order, proof_path)
+        if order_updated:
+            sync_order_status_to_csv(target_order, proof_path)
+            send_text(wa_id, f"✅ Recibimos nuevamente tu anticipo para la orden {target_order.order_code}. Volvera a quedar en validacion administrativa.")
+        else:
+            send_text(wa_id, "Recibimos el comprobante, pero no logramos relacionarlo con la orden indicada. Intenta de nuevo escribiendo anticipo+eliddetuorden.")
+        orders_temp.setdefault(wa_id, {}).pop("retry_order_db_id", None)
+        orders_temp.setdefault(wa_id, {}).pop("retry_order_code", None)
         user_states[wa_id] = "menu"
         return
 
