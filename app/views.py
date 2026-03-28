@@ -12,7 +12,8 @@ from .decorators.security import signature_required
 from .models import Customer, Order
 from .utils.whatsapp_utils import (
     process_whatsapp_message,
-    is_valid_whatsapp_message,)
+    is_valid_whatsapp_message,
+    send_text,)
 
 webhook_blueprint = Blueprint("webhook", __name__)
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -35,6 +36,22 @@ def save_reference_image(file_storage, order_id):
     file_storage.save(absolute_path)
 
     return f"img/referencias/{unique_name}".replace("\\", "/")
+
+
+def delete_reference_image_file(relative_path):
+    if not relative_path:
+        return
+
+    normalized_path = relative_path.replace("\\", "/").lstrip("/")
+    static_root = current_app.static_folder or current_app.root_path
+    absolute_path = os.path.abspath(os.path.join(static_root, normalized_path))
+    static_root_abs = os.path.abspath(static_root)
+
+    if not absolute_path.startswith(static_root_abs):
+        return
+
+    if os.path.isfile(absolute_path):
+        os.remove(absolute_path)
 
 def handle_message():
     """
@@ -124,6 +141,7 @@ def upload_reference_image():
         return jsonify({"error": "No se encontro la orden solicitada."}), 404
 
     try:
+        delete_reference_image_file(order.reference_image)
         order.reference_image = save_reference_image(reference_image, order.id)
         db.session.commit()
     except ValueError as error:
@@ -152,6 +170,7 @@ def upload_reference_image_for_order(pedido_id):
 
     try:
         saved_path = save_reference_image(reference_image, order.id)
+        delete_reference_image_file(order.reference_image)
         order.reference_image = saved_path
         db.session.commit()
     except ValueError as error:
@@ -162,6 +181,75 @@ def upload_reference_image_for_order(pedido_id):
         return jsonify({"error": f"No fue posible guardar la imagen: {error}"}), 500
 
     return jsonify({"status": "success", "url": saved_path, "order": order.to_admin_dict()}), 200
+
+
+@webhook_blueprint.route("/api/admin/orders/<int:pedido_id>/reference-image", methods=["DELETE"])
+@login_required
+def delete_reference_image_for_order(pedido_id):
+    order = Order.query.get(pedido_id)
+    if order is None:
+        return jsonify({"error": "No se encontro la orden solicitada."}), 404
+
+    try:
+        delete_reference_image_file(order.reference_image)
+        order.reference_image = None
+        if order.status == "comprado":
+            order.status = "anticipo_pendiente"
+        db.session.commit()
+    except Exception as error:
+        logging.exception("No fue posible eliminar la referencia del pedido %s", pedido_id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible eliminar la referencia: {error}"}), 500
+
+    return jsonify({"status": "success", "order": order.to_admin_dict()}), 200
+
+
+@webhook_blueprint.route("/api/admin/orders/<int:pedido_id>/approve-anticipo", methods=["POST"])
+@login_required
+def approve_anticipo_for_order(pedido_id):
+    order = Order.query.get(pedido_id)
+    if order is None:
+        return jsonify({"error": "No se encontro la orden solicitada."}), 404
+
+    if not order.payment_proof:
+        return jsonify({"error": "La orden no tiene comprobante de anticipo cargado."}), 400
+
+    if not order.reference_image:
+        return jsonify({"error": "Debes subir una referencia antes de aprobar el anticipo."}), 400
+
+    try:
+        order.status = "comprado"
+        db.session.commit()
+    except Exception as error:
+        logging.exception("No fue posible aprobar el anticipo del pedido %s", pedido_id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible aprobar el anticipo: {error}"}), 500
+
+    return jsonify({"status": "success", "order": order.to_admin_dict()}), 200
+
+
+@webhook_blueprint.route("/api/admin/orders/<int:pedido_id>/reject-anticipo", methods=["POST"])
+@login_required
+def reject_anticipo_for_order(pedido_id):
+    order = Order.query.get(pedido_id)
+    if order is None:
+        return jsonify({"error": "No se encontro la orden solicitada."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    message = (payload.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "Debes enviar el mensaje de rechazo."}), 400
+
+    try:
+        send_text(order.wa_id, message)
+        order.status = "rechazado"
+        db.session.commit()
+    except Exception as error:
+        logging.exception("No fue posible rechazar el anticipo del pedido %s", pedido_id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible rechazar el anticipo: {error}"}), 500
+
+    return jsonify({"status": "success", "order": order.to_admin_dict()}), 200
 
 
 @webhook_blueprint.route("/api/admin/orders/reference-images", methods=["POST"])
@@ -185,6 +273,7 @@ def upload_reference_images():
             if order is None:
                 raise ValueError(f"La orden {raw_order_id} no existe.")
 
+            delete_reference_image_file(order.reference_image)
             order.reference_image = save_reference_image(reference_image, order.id)
             updated_orders.append(order)
 

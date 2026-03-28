@@ -181,7 +181,7 @@ def mark_order_as_paid(wa_id, payment_proof):
     if target_order:
         target_order.payment_proof = payment_proof
         target_order.payment_received_at = datetime.utcnow()
-        target_order.status = "comprado"
+        target_order.status = "anticipo_pendiente"
         db.session.commit()
 
     updated_order = None
@@ -207,7 +207,7 @@ def mark_order_as_paid(wa_id, payment_proof):
         return bool(target_order)
 
     rows[target_index]["payment_proof"] = payment_proof
-    rows[target_index]["status"] = "comprado"
+    rows[target_index]["status"] = "anticipo_pendiente"
     updated_order = rows[target_index].copy()
 
     with open(CSV_FILE, mode="w", newline="", encoding="utf-8") as file:
@@ -423,7 +423,7 @@ def process_whatsapp_message(body):
         proof_path = download_media(media_id, "comprobante")
         order_updated = mark_order_as_paid(wa_id, proof_path)
         if order_updated:
-            send_text(wa_id, "✅ Orden enlistada exitosamente. \n Una persona de nuestro equipo se comunicará contigo en menos de 48 horas para confirmar detalles y tiempos de entrega.")
+            send_text(wa_id, "✅ Recibimos tu anticipo. \n Ahora quedara en validacion administrativa y una persona de nuestro equipo se comunicara contigo en menos de 48 horas para confirmar detalles y tiempos de entrega.")
         else:
             send_text(wa_id, "Recibimos tu comprobante, pero no logramos enlazarlo a una orden activa. Nuestro equipo lo revisará manualmente.")
         user_states[wa_id] = "menu"
