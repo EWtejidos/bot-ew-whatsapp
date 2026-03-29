@@ -153,9 +153,15 @@ def ensure_runtime_schema():
 
     if not inspector.has_table("order"):
         db.create_all()
-        return
+    if not inspector.has_table("product"):
+        db.create_all()
 
     order_columns = {column["name"] for column in inspector.get_columns("order")}
+    product_columns = (
+        {column["name"] for column in inspector.get_columns("product")}
+        if inspector.has_table("product")
+        else set()
+    )
     customer_columns = (
         {column["name"] for column in inspector.get_columns("customer")}
         if inspector.has_table("customer")
@@ -174,6 +180,8 @@ def ensure_runtime_schema():
         statements.append("ALTER TABLE \"order\" ADD COLUMN date VARCHAR(20)")
     if "deadline" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN deadline VARCHAR(80)")
+    if "assigned_to" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN assigned_to VARCHAR(80)")
     if "quote_min" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN quote_min INTEGER")
     if "quote_max" not in order_columns:
@@ -185,6 +193,24 @@ def ensure_runtime_schema():
     # La referencia del panel admin vive en una columna distinta a product_image.
     if "reference_image" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN reference_image VARCHAR(255)")
+
+    if inspector.has_table("product"):
+        if "owner_username" not in product_columns:
+            statements.append("ALTER TABLE product ADD COLUMN owner_username VARCHAR(80)")
+        if "name" not in product_columns:
+            statements.append("ALTER TABLE product ADD COLUMN name VARCHAR(150)")
+        if "category" not in product_columns:
+            statements.append("ALTER TABLE product ADD COLUMN category VARCHAR(100)")
+        if "price" not in product_columns:
+            statements.append("ALTER TABLE product ADD COLUMN price INTEGER")
+        if "image_path" not in product_columns:
+            statements.append("ALTER TABLE product ADD COLUMN image_path VARCHAR(255)")
+        if "is_active" not in product_columns:
+            statements.append("ALTER TABLE product ADD COLUMN is_active BOOLEAN DEFAULT 1")
+        if "created_at" not in product_columns:
+            statements.append("ALTER TABLE product ADD COLUMN created_at DATETIME")
+        if "updated_at" not in product_columns:
+            statements.append("ALTER TABLE product ADD COLUMN updated_at DATETIME")
 
     if inspector.has_table("customer"):
         if "created_at" not in customer_columns:

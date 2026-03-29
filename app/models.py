@@ -14,6 +14,34 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(200), nullable=False)
 
 
+class Product(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    owner_username = db.Column(db.String(80), nullable=False, index=True)
+    name = db.Column(db.String(150), nullable=False)
+    category = db.Column(db.String(100), nullable=False)
+    price = db.Column(db.Integer, nullable=False)
+    image_path = db.Column(db.String(255), nullable=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "owner_username": self.owner_username,
+            "name": self.name,
+            "category": self.category,
+            "price": self.price,
+            "image_path": self.image_path,
+            "is_active": self.is_active,
+        }
+
+
 # Cliente que escribe por WhatsApp.
 class Customer(db.Model):
     # ID interno del cliente.
@@ -103,6 +131,8 @@ class Order(db.Model):
     delivery = db.Column(db.String(255), nullable=True)
     # Fecha limite objetivo de entrega (si se define en el flujo).
     deadline = db.Column(db.String(80), nullable=True)
+    # Usuario tejedor/aliado que acepto el pedido desde el panel.
+    assigned_to = db.Column(db.String(80), nullable=True)
     # Ruta local de la imagen del producto enviada por WhatsApp.
     product_image = db.Column(db.String(255), nullable=True)
     # Ruta local de la referencia cargada manualmente desde el panel admin.
@@ -140,6 +170,9 @@ class Order(db.Model):
             "delivery": self.delivery,
             "description": self.description,
             "deadline": self.deadline,
+            "assigned_to": self.assigned_to,
+            "length_cm": self.length_cm,
+            "width_cm": self.width_cm,
             "product_image": self.product_image,
             # Se expone aparte para no mezclarla con la imagen original del pedido.
             "reference_image": self.reference_image,
@@ -166,10 +199,13 @@ class Order(db.Model):
             "anticipo": self.advance_payment,
             "delivery": self.delivery,
             "deadline": self.deadline,
+            "assigned_to": self.assigned_to,
             "description": self.description,
+            "length_cm": self.length_cm,
+            "width_cm": self.width_cm,
             "product_image": self.product_image,
             "reference_image": self.reference_image,
             "payment_proof": self.payment_proof,
-            "weaver": "Sin asignar",
-            "assigned": False,
+            "weaver": self.assigned_to or "Sin asignar",
+            "assigned": bool(self.assigned_to),
         }

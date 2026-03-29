@@ -3,19 +3,25 @@ import os
 import uuid
 
 from flask import Blueprint, request, jsonify, current_app
-from flask_login import login_required
+from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 # Importaciones relativas (usando el punto .)
 from app import db
 from .decorators.security import signature_required
-from .models import Customer, Order
+from .models import Customer, Order, Product
 from .utils.whatsapp_utils import (
     process_whatsapp_message,
     is_valid_whatsapp_message,)
 
 webhook_blueprint = Blueprint("webhook", __name__)
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+PRODUCT_CATEGORIES = [
+    "Prenda de vestir",
+    "Vestido de baño",
+    "Amigurumi o peluche",
+    "Llavero o flores",
+]
 
 
 def save_reference_image(file_storage, order_id):
@@ -51,6 +57,24 @@ def delete_reference_image_file(relative_path):
 
     if os.path.isfile(absolute_path):
         os.remove(absolute_path)
+
+
+def save_catalog_image(file_storage, owner_username):
+    filename = secure_filename(file_storage.filename or "")
+    extension = os.path.splitext(filename)[1].lower()
+
+    if extension not in ALLOWED_IMAGE_EXTENSIONS:
+        raise ValueError("Formato de imagen no permitido.")
+
+    static_root = current_app.static_folder or current_app.root_path
+    target_folder = os.path.join(static_root, "img", "catalogo")
+    os.makedirs(target_folder, exist_ok=True)
+
+    unique_name = f"{owner_username}_{uuid.uuid4().hex[:10]}{extension}"
+    absolute_path = os.path.join(target_folder, unique_name)
+    file_storage.save(absolute_path)
+
+    return f"img/catalogo/{unique_name}".replace("\\", "/")
 
 def handle_message():
     """
@@ -123,6 +147,130 @@ def customers():
 def admin_orders():
     orders = Order.query.order_by(Order.created_at.desc()).all()
     return jsonify([order.to_admin_dict() for order in orders]), 200
+
+
+@webhook_blueprint.route("/api/product-categories", methods=["GET"])
+def product_categories():
+    return jsonify(PRODUCT_CATEGORIES), 200
+
+
+@webhook_blueprint.route("/api/productos", methods=["GET"])
+@login_required
+def my_products():
+    products = Product.query.filter_by(owner_username=current_user.username).order_by(Product.created_at.desc()).all()
+    return jsonify([product.to_dict() for product in products]), 200
+
+
+@webhook_blueprint.route("/api/public/productos", methods=["GET"])
+def public_products():
+    products = Product.query.filter_by(is_active=True).order_by(Product.created_at.desc()).all()
+    return jsonify([product.to_dict() for product in products]), 200
+
+
+@webhook_blueprint.route("/api/productos", methods=["POST"])
+@login_required
+def create_product():
+    name = (request.form.get("name") or "").strip()
+    category = (request.form.get("category") or "").strip()
+    price = request.form.get("price", type=int)
+    image = request.files.get("image")
+
+    if not name or not category or price is None:
+        return jsonify({"error": "Debes enviar nombre, categoria y precio."}), 400
+
+    if category not in PRODUCT_CATEGORIES:
+        return jsonify({"error": "La categoria seleccionada no es valida."}), 400
+
+    try:
+        saved_image = save_catalog_image(image, current_user.username) if image else None
+        product = Product(
+            owner_username=current_user.username,
+            name=name,
+            category=category,
+            price=price,
+            image_path=saved_image,
+            is_active=True,
+        )
+        db.session.add(product)
+        db.session.commit()
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        logging.exception("No fue posible crear el producto")
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible crear el producto: {error}"}), 500
+
+    return jsonify(product.to_dict()), 201
+
+
+@webhook_blueprint.route("/api/productos/<int:product_id>", methods=["PUT"])
+@login_required
+def update_product(product_id):
+    product = Product.query.filter_by(id=product_id, owner_username=current_user.username).first()
+    if product is None:
+        return jsonify({"error": "No se encontro el producto solicitado."}), 404
+
+    name = (request.form.get("name") or product.name).strip()
+    category = (request.form.get("category") or product.category).strip()
+    raw_price = request.form.get("price")
+    remove_image = (request.form.get("remove_image") or "").strip().lower() == "true"
+    image = request.files.get("image")
+
+    try:
+        if raw_price is not None and raw_price != "":
+            product.price = int(raw_price)
+        product.name = name
+        product.category = category
+
+        if category not in PRODUCT_CATEGORIES:
+            return jsonify({"error": "La categoria seleccionada no es valida."}), 400
+
+        if remove_image:
+            delete_reference_image_file(product.image_path)
+            product.image_path = None
+
+        if image:
+            delete_reference_image_file(product.image_path)
+            product.image_path = save_catalog_image(image, current_user.username)
+
+        db.session.commit()
+    except ValueError as error:
+        db.session.rollback()
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        logging.exception("No fue posible actualizar el producto %s", product_id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible actualizar el producto: {error}"}), 500
+
+    return jsonify(product.to_dict()), 200
+
+
+@webhook_blueprint.route("/api/productos/<int:product_id>/toggle", methods=["POST"])
+@login_required
+def toggle_product(product_id):
+    product = Product.query.filter_by(id=product_id, owner_username=current_user.username).first()
+    if product is None:
+        return jsonify({"error": "No se encontro el producto solicitado."}), 404
+
+    try:
+        product.is_active = not product.is_active
+        db.session.commit()
+    except Exception as error:
+        logging.exception("No fue posible cambiar el estado del producto %s", product_id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible cambiar el estado del producto: {error}"}), 500
+
+    return jsonify(product.to_dict()), 200
+
+
+@webhook_blueprint.route("/api/pedidos/aprobados", methods=["GET"])
+@login_required
+def approved_orders_for_weaver():
+    orders = Order.query.order_by(Order.created_at.desc()).all()
+    return jsonify({
+        "current_user": current_user.username,
+        "orders": [order.to_admin_dict() for order in orders],
+    }), 200
 
 
 @webhook_blueprint.route("/api/admin/orders/reference-image", methods=["POST"])
@@ -241,6 +389,31 @@ def reject_anticipo_for_order(pedido_id):
         logging.exception("No fue posible rechazar el anticipo del pedido %s", pedido_id)
         db.session.rollback()
         return jsonify({"error": f"No fue posible rechazar el anticipo: {error}"}), 500
+
+    return jsonify({"status": "success", "order": order.to_admin_dict()}), 200
+
+
+@webhook_blueprint.route("/api/pedidos/<int:pedido_id>/accept", methods=["POST"])
+@login_required
+def accept_order_for_weaver(pedido_id):
+    order = Order.query.get(pedido_id)
+    if order is None:
+        return jsonify({"error": "No se encontro la orden solicitada."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    deadline = (payload.get("deadline") or "").strip()
+
+    if not deadline:
+        return jsonify({"error": "Debes seleccionar una fecha de entrega."}), 400
+
+    try:
+        order.deadline = deadline
+        order.assigned_to = current_user.username
+        db.session.commit()
+    except Exception as error:
+        logging.exception("No fue posible aceptar el pedido %s", pedido_id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible aceptar el pedido: {error}"}), 500
 
     return jsonify({"status": "success", "order": order.to_admin_dict()}), 200
 
