@@ -149,6 +149,17 @@ def admin_orders():
     return jsonify([order.to_admin_dict() for order in orders]), 200
 
 
+@webhook_blueprint.route("/api/orders", methods=["GET"])
+def orders_for_panel():
+    """
+    Endpoint público que retorna todas las órdenes para el panel de administración.
+    Utilizado por productosadmin.js para cargar órdenes de clientes.
+    Retorna datos con estructura compatible con el frontend.
+    """
+    orders = Order.query.order_by(Order.created_at.desc()).all()
+    return jsonify([order.to_admin_dict() for order in orders]), 200
+
+
 @webhook_blueprint.route("/api/product-categories", methods=["GET"])
 def product_categories():
     return jsonify(PRODUCT_CATEGORIES), 200
