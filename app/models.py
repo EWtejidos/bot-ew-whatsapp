@@ -75,7 +75,7 @@ class Customer(db.Model):
         if latest_order:
             # Mensaje de detalle para mostrar ultima orden y estado actual.
             detail = (
-                f"Ultima orden {latest_order.order_code} en estado "
+                f"Ultima orden {latest_order.id_orden} en estado "
                 f"{latest_order.status.replace('_', ' ')}"
             )
 
@@ -94,8 +94,6 @@ class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     # Identificador aleatorio unico de la orden (ID_orden de negocio).
     id_orden = db.Column(db.String(24), unique=True, nullable=False, index=True)
-    # Codigo visible de negocio (ej: EW-000001), unico.
-    order_code = db.Column(db.String(20), unique=True, nullable=False, index=True)
     # Clave foranea al cliente dueño de la orden.
     customer_id = db.Column(db.Integer, db.ForeignKey("customer.id"), nullable=False, index=True)
     # Fecha de creacion de la orden.
@@ -156,7 +154,6 @@ class Order(db.Model):
         return {
             "id": self.id,
             "id_orden": self.id_orden,
-            "order_code": self.order_code,
             "wa_id": self.wa_id,
             "cliente": customer_name,
             "producto": " / ".join(
@@ -185,24 +182,31 @@ class Order(db.Model):
         return {
             "id": self.id,
             "id_orden": self.id_orden,
-            "order_code": self.order_code,
             "wa_id": self.wa_id,
             "cliente": customer_name,
             "producto": " / ".join(
                 value for value in [self.product_type, self.product_name] if value
             ) or "Producto personalizado",
+            "product_type": self.product_type,
+            "product_name": self.product_name,
+            "colors": self.colors,
             "fecha": self.date or (self.created_at.strftime("%Y-%m-%d") if self.created_at else ""),
             "fecha_hora": self.created_at.strftime("%d/%m/%Y %H:%M") if self.created_at else "",
+            "date": self.date,
             "status": self.status,
             "cotizacion_min": self.quote_min,
             "cotizacion_max": self.quote_max,
+            "quote_min": self.quote_min,
+            "quote_max": self.quote_max,
             "anticipo": self.advance_payment,
+            "advance_payment": self.advance_payment,
             "delivery": self.delivery,
             "deadline": self.deadline,
             "assigned_to": self.assigned_to,
             "description": self.description,
             "length_cm": self.length_cm,
             "width_cm": self.width_cm,
+            "full_name": self.full_name,
             "product_image": self.product_image,
             "reference_image": self.reference_image,
             "payment_proof": self.payment_proof,

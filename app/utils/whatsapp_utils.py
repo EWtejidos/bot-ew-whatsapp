@@ -49,12 +49,6 @@ def save_customer(wa_id, full_name):
     return customer
 
 
-def generate_order_code():
-    last_order = Order.query.order_by(Order.id.desc()).first()
-    next_number = 1 if not last_order else last_order.id + 1
-    return f"EW-{next_number:06d}"
-
-
 def generate_unique_order_id():
     while True:
         candidate = f"ID-{secrets.token_hex(4).upper()}"
@@ -75,10 +69,7 @@ def find_order_for_retry(wa_id, raw_order_token):
         Order.query.filter(
             Order.wa_id == wa_id,
             Order.status.in_(["rechazado", "anticipo_pendiente", "cotizacion"]),
-            db.or_(
-                Order.id_orden == token,
-                Order.order_code == token,
-            ),
+            Order.id_orden == token,
         )
         .order_by(Order.created_at.desc())
         .first()
@@ -134,7 +125,6 @@ def save_order(order_data):
 
     saved_order = Order(
         id_orden=generate_unique_order_id(),
-        order_code=generate_order_code(),
         customer_id=customer.id,
         date=order_date,
         wa_id=order_data.get("wa_id"),
@@ -163,7 +153,6 @@ def save_order(order_data):
 
         writer = csv.DictWriter(file, fieldnames=[
             "id_orden",
-            "order_code",
             "date",
             "wa_id",
             "product_type",
@@ -187,7 +176,6 @@ def save_order(order_data):
             writer.writeheader()
 
         order_data["id_orden"] = saved_order.id_orden
-        order_data["order_code"] = saved_order.order_code
         writer.writerow(order_data)
 
     send_order_email("nueva_orden", order_data)
@@ -269,7 +257,7 @@ def sync_order_status_to_csv(order, payment_proof):
 
     updated = False
     for row in rows:
-        if row.get("id_orden") == order.id_orden or row.get("order_code") == order.order_code:
+        if row.get("id_orden") == order.id_orden:
             row["payment_proof"] = payment_proof
             row["status"] = "anticipo_pendiente"
             updated = True
@@ -348,7 +336,7 @@ def process_whatsapp_message(body):
             user_states[wa_id] = "waiting_payment_retry"
             send_text(
                 wa_id,
-                f"Perfecto. Ya identifique la orden {target_order.order_code}. Ahora envia nuevamente la foto del anticipo para revisarla otra vez."
+                f"Perfecto. Ya identifique la orden {target_order.id_orden}. Ahora envia nuevamente la foto del anticipo para revisarla otra vez."
             )
         else:
             send_text(
@@ -520,7 +508,7 @@ def process_whatsapp_message(body):
         order_updated = mark_specific_order_as_paid(target_order, proof_path)
         if order_updated:
             sync_order_status_to_csv(target_order, proof_path)
-            send_text(wa_id, f"✅ Recibimos nuevamente tu anticipo para la orden {target_order.order_code}. Volvera a quedar en validacion administrativa.")
+            send_text(wa_id, f"✅ Recibimos nuevamente tu anticipo para la orden {target_order.id_orden}. Volvera a quedar en validacion administrativa.")
         else:
             send_text(wa_id, "Recibimos el comprobante, pero no logramos relacionarlo con la orden indicada. Intenta de nuevo escribiendo anticipo+eliddetuorden.")
         orders_temp.setdefault(wa_id, {}).pop("retry_order_db_id", None)

@@ -369,12 +369,6 @@ def approve_anticipo_for_order(pedido_id):
     if order is None:
         return jsonify({"error": "No se encontro la orden solicitada."}), 404
 
-    if not order.payment_proof:
-        return jsonify({"error": "La orden no tiene comprobante de anticipo cargado."}), 400
-
-    if not order.reference_image:
-        return jsonify({"error": "Debes subir una referencia antes de aprobar el anticipo."}), 400
-
     try:
         order.status = "comprado"
         db.session.commit()
@@ -464,3 +458,80 @@ def upload_reference_images():
         return jsonify({"error": f"No fue posible guardar las imagenes: {error}"}), 500
 
     return jsonify([order.to_admin_dict() for order in updated_orders]), 200
+
+
+@webhook_blueprint.route("/api/admin/orders/<int:order_id>", methods=["PUT"])
+@login_required
+def update_order(order_id):
+    """
+    Actualiza una orden existente.
+    Permite editar todos los campos relevantes de la orden.
+    """
+    order = Order.query.get(order_id)
+    if order is None:
+        return jsonify({"error": "No se encontro la orden solicitada."}), 404
+
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        # Actualizar campos si están presentes en el payload
+        if "product_type" in payload:
+            order.product_type = payload["product_type"]
+        if "product_name" in payload:
+            order.product_name = payload["product_name"]
+        if "colors" in payload:
+            order.colors = payload["colors"]
+        if "length_cm" in payload:
+            order.length_cm = payload["length_cm"]
+        if "width_cm" in payload:
+            order.width_cm = payload["width_cm"]
+        if "description" in payload:
+            order.description = payload["description"]
+        if "full_name" in payload:
+            order.full_name = payload["full_name"]
+        if "delivery" in payload:
+            order.delivery = payload["delivery"]
+        if "date" in payload:
+            order.date = payload["date"]
+        if "deadline" in payload:
+            order.deadline = payload["deadline"]
+        if "quote_min" in payload:
+            order.quote_min = payload["quote_min"]
+        if "quote_max" in payload:
+            order.quote_max = payload["quote_max"]
+        if "advance_payment" in payload:
+            order.advance_payment = payload["advance_payment"]
+
+        db.session.commit()
+    except Exception as error:
+        logging.exception("No fue posible actualizar la orden %s", order_id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible actualizar la orden: {error}"}), 500
+
+    return jsonify({"status": "success", "order": order.to_admin_dict()}), 200
+
+
+@webhook_blueprint.route("/api/admin/orders/<int:order_id>", methods=["DELETE"])
+@login_required
+def delete_order(order_id):
+    """
+    Elimina una orden de la base de datos.
+    Usa el ID numérico de la orden.
+    """
+    order = Order.query.get(order_id)
+    if order is None:
+        return jsonify({"error": "No se encontro la orden solicitada."}), 404
+
+    try:
+        # Eliminar imagenes asociadas antes de borrar la orden
+        delete_reference_image_file(order.reference_image)
+        delete_reference_image_file(order.product_image)
+        
+        db.session.delete(order)
+        db.session.commit()
+    except Exception as error:
+        logging.exception("No fue posible eliminar la orden %s", order_id)
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible eliminar la orden: {error}"}), 500
+
+    return jsonify({"status": "success", "message": "Orden eliminada correctamente."}), 200
