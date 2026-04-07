@@ -156,9 +156,7 @@ class Order(db.Model):
             "id_orden": self.id_orden,
             "wa_id": self.wa_id,
             "cliente": customer_name,
-            "producto": " / ".join(
-                value for value in [self.product_type, self.product_name] if value
-            ),
+            "producto": self.product_name or "Producto personalizado",
             "product_name": self.product_name,
             "fecha": self.date or (self.created_at.strftime("%d/%m/%Y %H:%M") if self.created_at else ""),
             "status": self.status,
