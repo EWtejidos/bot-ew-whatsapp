@@ -18,7 +18,7 @@ def create_app():
     from .views import webhook_blueprint
 
     # Ruta absoluta hacia tu carpeta de archivos web (HTML/CSS/Images)
-    base_dir = '/home/ewtejidos/bot/ew_website'
+    base_dir = '/home/ewtejidos/bot/web'
 
     app = Flask(__name__,
                 template_folder=base_dir,

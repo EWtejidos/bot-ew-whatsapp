@@ -159,6 +159,7 @@ class Order(db.Model):
             "producto": " / ".join(
                 value for value in [self.product_type, self.product_name] if value
             ),
+            "product_name": self.product_name,
             "fecha": self.date or (self.created_at.strftime("%d/%m/%Y %H:%M") if self.created_at else ""),
             "status": self.status,
             "cotizacion_min": self.quote_min,
