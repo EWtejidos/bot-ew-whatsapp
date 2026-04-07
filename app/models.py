@@ -169,7 +169,7 @@ class Order(db.Model):
             "assigned_to": self.assigned_to,
             "length_cm": self.length_cm,
             "width_cm": self.width_cm,
-            "product_image": self.product_image,
+            "product_image": self.product_image or self.reference_image,
             # Se expone aparte para no mezclarla con la imagen original del pedido.
             "reference_image": self.reference_image,
         }
