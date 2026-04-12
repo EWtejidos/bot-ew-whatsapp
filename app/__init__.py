@@ -64,23 +64,27 @@ def create_app():
         # Buscamos al usuario por su nombre en la base de datos
         user = User.query.filter_by(username=username).first()
 
+        # Si el usuario existe, el usuario debe seleccionar el tipo correcto
+        if user and user_type and user.role != user_type:
+            flash('El tipo de usuario no coincide con este acceso.')
+            return redirect(url_for('show_page', page='loguin'))
+
         # Verificamos si el usuario existe y si la contraseña (hash) coincide
         if user and check_password_hash(user.password, password):
             # Creamos la sesión oficial del usuario
             login_user(user)
 
-            # REDIRECCIÓN SEGÚN EL TIPO ELEGIDO EN EL FORMULARIO
-            if user_type == 'admin':
+            # REDIRECCIÓN SEGÚN EL ROL GUARDADO EN LA BD
+            if user.role == 'admin':
                 return redirect(url_for('show_page', page='tableroadmin'))
-            elif user_type == 'transportista':
-                return redirect(url_for('show_page', page='transporteadmin')) # O la página que gustes
+            elif user.role == 'transportista':
+                return redirect(url_for('show_page', page='transporteadmin'))
             else:
-                # Por defecto (Tejedor/Aliado) va al tablero normal
+                # Por defecto, Tejedor/Aliado va al tablero normal
                 return redirect(url_for('show_page', page='dashboard'))
 
-        # Si algo falla (usuario no existe o clave mal), enviamos el mensaje de error
+        # Si algo falla (usuario no existe, rol incorrecto o clave mal), enviamos el mensaje de error
         flash('Usuario o contraseña incorrectos')
-        # Lo regresamos a la página de login (pasando 'loguin' como parámetro)
         return redirect(url_for('show_page', page='loguin'))
 
     @app.route('/logout')
@@ -109,30 +113,50 @@ def create_app():
             'ordenesadmin': 'ordenesadmin.html',
             'transporteadmin': 'transporteadmin.html',
             'contabilidadadmin': 'contabilidadadmin.html',
-            'basesadmin': 'basesadmin.html'
+            'basesadmin': 'basesadmin.html',
+            'usuariosadmin': 'usuariosadmin.html'
         }
 
         template = pages.get(clean_page)
 
         if template:
             # --- PROTECCIÓN DE SEGURIDAD ---
-            # Definimos qué páginas NO se pueden ver sin haber iniciado sesión
             paginas_privadas = [
                 'dashboard', 'pedidos', 'productos',
                 'tableroadmin', 'anticiposadmin', 'ordenesadmin',
-                'transporteadmin', 'contabilidadadmin', 'basesadmin'
+                'transporteadmin', 'contabilidadadmin', 'basesadmin',
+                'usuariosadmin'
             ]
 
+            page_roles = {
+                'dashboard': ['admin', 'tejedor'],
+                'pedidos': ['admin', 'tejedor'],
+                'productos': ['admin', 'tejedor'],
+                'tableroadmin': ['admin'],
+                'anticiposadmin': ['admin'],
+                'ordenesadmin': ['admin'],
+                'transporteadmin': ['admin', 'transportista'],
+                'contabilidadadmin': ['admin'],
+                'basesadmin': ['admin'],
+                'usuariosadmin': ['admin'],
+            }
+
             if clean_page in paginas_privadas:
-                # Si la página es privada y el usuario no está logueado...
                 if not current_user.is_authenticated:
-                    # Lo rebotamos al login
                     return redirect(url_for('show_page', page='loguin'))
 
-            # Si pasó la prueba o la página es pública (como 'nosotros'), la mostramos
+            if current_user.is_authenticated and clean_page in page_roles:
+                allowed_roles = page_roles.get(clean_page, [])
+                if current_user.role not in allowed_roles:
+                    flash('No tienes permiso para acceder a esta página.')
+                    if current_user.role == 'admin':
+                        return redirect(url_for('show_page', page='tableroadmin'))
+                    if current_user.role == 'transportista':
+                        return redirect(url_for('show_page', page='transporteadmin'))
+                    return redirect(url_for('show_page', page='dashboard'))
+
             return render_template(template)
 
-        # Si la página no está en el diccionario, error 404
         return f"La página '{page}' no existe", 404
 
     # Registro del Blueprint del bot de WhatsApp
@@ -194,6 +218,12 @@ def ensure_runtime_schema():
     if "reference_image" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN reference_image VARCHAR(255)")
 
+    user_columns = (
+        {column["name"] for column in inspector.get_columns("user")}
+        if inspector.has_table("user")
+        else set()
+    )
+
     if inspector.has_table("product"):
         if "owner_username" not in product_columns:
             statements.append("ALTER TABLE product ADD COLUMN owner_username VARCHAR(80)")
@@ -211,6 +241,10 @@ def ensure_runtime_schema():
             statements.append("ALTER TABLE product ADD COLUMN created_at DATETIME")
         if "updated_at" not in product_columns:
             statements.append("ALTER TABLE product ADD COLUMN updated_at DATETIME")
+
+    if inspector.has_table("user"):
+        if "role" not in user_columns:
+            statements.append("ALTER TABLE \"user\" ADD COLUMN role VARCHAR(30) NOT NULL DEFAULT 'tejedor'")
 
     if inspector.has_table("customer"):
         if "created_at" not in customer_columns:

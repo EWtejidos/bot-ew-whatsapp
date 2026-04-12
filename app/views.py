@@ -1,21 +1,36 @@
-import logging
-import os
-import uuid
+import logging  # Permite registrar errores, advertencias e información útil (logs)
+import os       # Manejo del sistema de archivos (rutas, carpetas, etc.)
+import uuid     # Genera identificadores únicos (muy útil para nombres de archivos)
 
+# Importaciones principales de Flask para manejar rutas, requests y respuestas
 from flask import Blueprint, request, jsonify, current_app
+
+# Manejo de autenticación (usuarios logueados)
 from flask_login import login_required, current_user
+
+# Para encriptar contraseñas de forma segura antes de guardarlas en BD
+from werkzeug.security import generate_password_hash
+
+# Para sanitizar nombres de archivos (evita ataques o errores con nombres raros)
 from werkzeug.utils import secure_filename
 
-# Importaciones relativas (usando el punto .)
-from app import db
-from .decorators.security import signature_required
-from .models import Customer, Order, Product
+# Importaciones internas de tu proyecto (arquitectura modular)
+from app import db  # Instancia de la base de datos
+from .decorators.security import signature_required  # Decorador de seguridad (probablemente valida origen de requests)
+from .models import Customer, Order, Product, User  # Modelos de base de datos (tablas)
 from .utils.whatsapp_utils import (
-    process_whatsapp_message,
-    is_valid_whatsapp_message,)
+    process_whatsapp_message,  # Función que procesa lógica del bot
+    is_valid_whatsapp_message, # Función que valida si el mensaje es real
+)
 
+# Se crea un Blueprint (módulo de rutas) llamado "webhook"
+# Esto permite organizar el backend por funcionalidades
 webhook_blueprint = Blueprint("webhook", __name__)
+
+# Extensiones de imagen permitidas para subir archivos
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+# Categorías disponibles para productos (esto probablemente alimenta formularios o lógica de negocio)
 PRODUCT_CATEGORIES = [
     "Prenda de vestir",
     "Vestido de baño",
@@ -25,96 +40,159 @@ PRODUCT_CATEGORIES = [
 
 
 def save_reference_image(file_storage, order_id):
-    # Guarda la referencia manual en una carpeta estatica publica del sitio.
+    # Guarda la referencia manual en una carpeta estática pública del sitio.
+
+    # Limpia el nombre del archivo para evitar problemas de seguridad
     filename = secure_filename(file_storage.filename or "")
+
+    # Obtiene la extensión del archivo (.jpg, .png, etc.)
     extension = os.path.splitext(filename)[1].lower()
 
+    # Valida que la extensión esté permitida
     if extension not in ALLOWED_IMAGE_EXTENSIONS:
         raise ValueError("Formato de imagen no permitido.")
 
+    # Define la carpeta raíz estática (donde Flask sirve archivos públicos)
     static_root = current_app.static_folder or current_app.root_path
+
+    # Define la carpeta destino para guardar imágenes de referencia
     target_folder = os.path.join(static_root, "img", "referencias")
+
+    # Crea la carpeta si no existe
     os.makedirs(target_folder, exist_ok=True)
 
+    # Genera un nombre único para evitar colisiones
     unique_name = f"order_{order_id}_{uuid.uuid4().hex[:10]}{extension}"
+
+    # Ruta absoluta donde se guardará el archivo
     absolute_path = os.path.join(target_folder, unique_name)
+
+    # Guarda el archivo en el servidor
     file_storage.save(absolute_path)
 
+    # Retorna la ruta relativa (para guardar en BD o usar en frontend)
     return f"img/referencias/{unique_name}".replace("\\", "/")
 
 
 def delete_reference_image_file(relative_path):
+    # Elimina una imagen previamente guardada
+
+    # Si no hay ruta, no hace nada
     if not relative_path:
         return
 
+    # Normaliza la ruta (evita problemas con slashes)
     normalized_path = relative_path.replace("\\", "/").lstrip("/")
+
+    # Define la raíz estática
     static_root = current_app.static_folder or current_app.root_path
+
+    # Construye la ruta absoluta del archivo
     absolute_path = os.path.abspath(os.path.join(static_root, normalized_path))
+
+    # Ruta absoluta de la carpeta estática
     static_root_abs = os.path.abspath(static_root)
 
+    # Seguridad: evita que se eliminen archivos fuera del directorio permitido
     if not absolute_path.startswith(static_root_abs):
         return
 
+    # Si el archivo existe, lo elimina
     if os.path.isfile(absolute_path):
         os.remove(absolute_path)
 
 
 def save_catalog_image(file_storage, owner_username):
+    # Guarda imágenes del catálogo de productos
+
+    # Limpia el nombre del archivo
     filename = secure_filename(file_storage.filename or "")
+
+    # Obtiene la extensión
     extension = os.path.splitext(filename)[1].lower()
 
+    # Valida extensión permitida
     if extension not in ALLOWED_IMAGE_EXTENSIONS:
         raise ValueError("Formato de imagen no permitido.")
 
+    # Define carpeta estática
     static_root = current_app.static_folder or current_app.root_path
+
+    # Carpeta destino para catálogo
     target_folder = os.path.join(static_root, "img", "catalogo")
+
+    # Crea carpeta si no existe
     os.makedirs(target_folder, exist_ok=True)
 
+    # Genera nombre único usando el usuario dueño
     unique_name = f"{owner_username}_{uuid.uuid4().hex[:10]}{extension}"
+
+    # Ruta absoluta
     absolute_path = os.path.join(target_folder, unique_name)
+
+    # Guarda archivo
     file_storage.save(absolute_path)
 
+    # Retorna ruta relativa
     return f"img/catalogo/{unique_name}".replace("\\", "/")
+
 
 def handle_message():
     """
-    Recibe el paquete de Meta y decide si enviarlo al proceso del bot.
+    Recibe el paquete de Meta (WhatsApp) y decide si enviarlo al proceso del bot.
     """
+
+    # Obtiene el JSON enviado por Meta (Webhook)
     body = request.get_json()
 
-    # 1. Usamos el filtro que ya tiene el try/except y detecta si es un mensaje real
+    # 1. Valida si el mensaje realmente es un mensaje de usuario
     if is_valid_whatsapp_message(body):
         try:
+            # Procesa el mensaje usando tu lógica del bot
             process_whatsapp_message(body)
-            # Respondemos OK a Meta para que sepa que recibimos el mensaje
+
+            # Responde OK a Meta (importante: evita reintentos)
             return jsonify({"status": "ok"}), 200
+
         except Exception as e:
+            # Si falla el procesamiento, lo registra en logs
             logging.error(f"Error procesando la lógica del bot: {e}")
+
+            # Devuelve error al cliente
             return jsonify({"status": "error", "message": "Internal processing error"}), 500
 
-    # 2. Si no es un mensaje (es un 'visto', 'entregado' o notificación de Meta)
-    # Respondemos 200 para que Meta no reintente, pero marcamos como ignorado.
+    # 2. Si no es un mensaje válido (puede ser "visto", "entregado", etc.)
+    # Igual se responde 200 para que Meta no reintente
     return jsonify({"status": "ignored", "message": "Not a valid user message"}), 200
 
 
 def verify():
     """
-    Verificación del Webhook requerida por Meta.
+    Verificación del Webhook requerida por Meta (Facebook/WhatsApp).
     """
+
+    # Obtiene parámetros enviados por Meta
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
+    # Verifica que existan los parámetros
     if mode and token:
-        # Aquí usa el token que inyectamos en el WSGI
+        # Compara el token recibido con el configurado en tu app
         if mode == "subscribe" and token == current_app.config.get("VERIFY_TOKEN"):
-            logging.info("WEBHOOK_VERIFIED")
+            logging.info("WEBHOOK_VERIFIED")  # Log de éxito
+
+            # Devuelve el challenge (Meta lo necesita para validar el webhook)
             return challenge, 200
         else:
             logging.warning("VERIFICATION_FAILED: Tokens do not match")
+
+            # Token incorrecto → acceso denegado
             return jsonify({"status": "error", "message": "Verification failed"}), 403
 
+    # Si faltan parámetros
     logging.warning("MISSING_PARAMETER: hub.mode or hub.verify_token")
+
     return jsonify({"status": "error", "message": "Missing parameters"}), 400
 
 # RUTAS
@@ -140,6 +218,46 @@ def recent_orders():
 def customers():
     customers_list = Customer.query.order_by(Customer.created_at.desc()).limit(100).all()
     return jsonify([customer.to_base_dict() for customer in customers_list]), 200
+
+
+@webhook_blueprint.route("/api/admin/users", methods=["GET"])
+@login_required
+def admin_users():
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+
+    users = User.query.order_by(User.username).all()
+    return jsonify([
+        {"id": user.id, "username": user.username, "role": user.role}
+        for user in users
+    ]), 200
+
+
+@webhook_blueprint.route("/api/admin/users", methods=["POST"])
+@login_required
+def create_admin_user():
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+
+    username = (request.form.get("username") or "").strip()
+    password = (request.form.get("password") or "").strip()
+    role = (request.form.get("role") or "tejedor").strip()
+
+    if not username or not password or role not in {"admin", "transportista", "tejedor"}:
+        return jsonify({"error": "Username, password and role are required."}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": "El usuario ya existe."}), 400
+
+    try:
+        hashed_pw = generate_password_hash(password)
+        new_user = User(username=username, password=hashed_pw, role=role)
+        db.session.add(new_user)
+        db.session.commit()
+        return jsonify({"id": new_user.id, "username": new_user.username, "role": new_user.role}), 201
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible crear el usuario: {error}"}), 500
 
 
 @webhook_blueprint.route("/api/admin/orders", methods=["GET"])
@@ -168,6 +286,9 @@ def product_categories():
 @webhook_blueprint.route("/api/productos", methods=["GET"])
 @login_required
 def my_products():
+    if current_user.role not in {"admin", "tejedor"}:
+        return jsonify({"error": "No autorizado"}), 403
+
     products = Product.query.filter_by(owner_username=current_user.username).order_by(Product.created_at.desc()).all()
     return jsonify([product.to_dict() for product in products]), 200
 
@@ -181,6 +302,9 @@ def public_products():
 @webhook_blueprint.route("/api/productos", methods=["POST"])
 @login_required
 def create_product():
+    if current_user.role not in {"admin", "tejedor"}:
+        return jsonify({"error": "No autorizado"}), 403
+
     name = (request.form.get("name") or "").strip()
     category = (request.form.get("category") or "").strip()
     price = request.form.get("price", type=int)
@@ -217,6 +341,9 @@ def create_product():
 @webhook_blueprint.route("/api/productos/<int:product_id>", methods=["PUT"])
 @login_required
 def update_product(product_id):
+    if current_user.role not in {"admin", "tejedor"}:
+        return jsonify({"error": "No autorizado"}), 403
+
     product = Product.query.filter_by(id=product_id, owner_username=current_user.username).first()
     if product is None:
         return jsonify({"error": "No se encontro el producto solicitado."}), 404
@@ -259,6 +386,9 @@ def update_product(product_id):
 @webhook_blueprint.route("/api/productos/<int:product_id>/toggle", methods=["POST"])
 @login_required
 def toggle_product(product_id):
+    if current_user.role not in {"admin", "tejedor"}:
+        return jsonify({"error": "No autorizado"}), 403
+
     product = Product.query.filter_by(id=product_id, owner_username=current_user.username).first()
     if product is None:
         return jsonify({"error": "No se encontro el producto solicitado."}), 404

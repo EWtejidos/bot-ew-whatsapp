@@ -8,7 +8,7 @@ from werkzeug.security import generate_password_hash
 # Creamos una instancia de tu aplicación. Esto carga las rutas y la configuración de SQLAlchemy
 app = create_app()
 
-def add_user(username, password):
+def add_user(username, password, role="tejedor"):
     # 'app_context' es como "encender el motor" de Flask sin abrir la página web.
     # Es necesario para que Python sepa en qué base de datos trabajar.
     with app.app_context():
@@ -27,18 +27,22 @@ def add_user(username, password):
         # De esta forma, ni tú mismo puedes ver la contraseña real en la base de datos.
         hashed_pw = generate_password_hash(password)
         
-        # Creamos el objeto usuario con el nombre y la clave ya cifrada
-        new_user = User(username=username, password=hashed_pw)
+        # Creamos el objeto usuario con el nombre, la clave ya cifrada y el rol.
+        new_user = User(username=username, password=hashed_pw, role=role)
         
         # 'add' prepara el registro y 'commit' lo guarda permanentemente en el archivo .db
         db.session.add(new_user)
         db.session.commit()
         
-        print(f"Usuario {username} creado.")
+        print(f"Usuario {username} creado con rol '{role}'.")
 
 # Este bloque asegura que el script solo pida datos si lo ejecutas directamente (python3 manage_users.py)
 if __name__ == "__main__":
     # Pedimos los datos por consola de forma interactiva
     u = input("Usuario: ")
     p = input("Password: ")
-    add_user(u, p)
+    r = input("Rol (admin/transportista/tejedor): ")
+    if r not in {"admin", "transportista", "tejedor"}:
+        print("Rol inválido. Usa admin, transportista o tejedor.")
+    else:
+        add_user(u, p, role=r)

@@ -12,6 +12,8 @@ class User(db.Model, UserMixin):
     username = db.Column(db.String(80), unique=True, nullable=False)
     # Contrasena hasheada (no texto plano).
     password = db.Column(db.String(200), nullable=False)
+    # Rol del usuario: admin, transportista o tejedor.
+    role = db.Column(db.String(30), nullable=False, default="tejedor", index=True)
 
 
 class Product(db.Model):
