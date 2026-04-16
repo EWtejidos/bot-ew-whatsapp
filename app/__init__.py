@@ -78,7 +78,7 @@ def create_app():
             if user.role == 'admin':
                 return redirect(url_for('show_page', page='tableroadmin'))
             elif user.role == 'transportista':
-                return redirect(url_for('show_page', page='transporteadmin'))
+                return redirect(url_for('show_page', page='tablerotransportista'))
             else:
                 # Por defecto, Tejedor/Aliado va al tablero normal
                 return redirect(url_for('show_page', page='dashboard'))
@@ -112,9 +112,11 @@ def create_app():
             'anticiposadmin': 'anticiposadmin.html',
             'ordenesadmin': 'ordenesadmin.html',
             'transporteadmin': 'transporteadmin.html',
+            'tablerotransportista': 'tablerotransportista.html',
             'contabilidadadmin': 'contabilidadadmin.html',
             'basesadmin': 'basesadmin.html',
-            'usuariosadmin': 'usuariosadmin.html'
+            'usuariosadmin': 'usuariosadmin.html',
+            'perfil': 'perfil.html'
         }
 
         template = pages.get(clean_page)
@@ -124,8 +126,8 @@ def create_app():
             paginas_privadas = [
                 'dashboard', 'pedidos', 'productos',
                 'tableroadmin', 'anticiposadmin', 'ordenesadmin',
-                'transporteadmin', 'contabilidadadmin', 'basesadmin',
-                'usuariosadmin'
+                'transporteadmin', 'tablerotransportista', 'contabilidadadmin', 'basesadmin',
+                'usuariosadmin', 'perfil'
             ]
 
             page_roles = {
@@ -135,10 +137,12 @@ def create_app():
                 'tableroadmin': ['admin'],
                 'anticiposadmin': ['admin'],
                 'ordenesadmin': ['admin'],
-                'transporteadmin': ['admin', 'transportista'],
+                'transporteadmin': ['admin'],
+                'tablerotransportista': ['admin', 'transportista'],
                 'contabilidadadmin': ['admin'],
                 'basesadmin': ['admin'],
                 'usuariosadmin': ['admin'],
+                'perfil': ['admin', 'tejedor', 'transportista'],
             }
 
             if clean_page in paginas_privadas:
@@ -152,7 +156,7 @@ def create_app():
                     if current_user.role == 'admin':
                         return redirect(url_for('show_page', page='tableroadmin'))
                     if current_user.role == 'transportista':
-                        return redirect(url_for('show_page', page='transporteadmin'))
+                        return redirect(url_for('show_page', page='tablerotransportista'))
                     return redirect(url_for('show_page', page='dashboard'))
 
             return render_template(template)
@@ -214,6 +218,20 @@ def ensure_runtime_schema():
         statements.append("ALTER TABLE \"order\" ADD COLUMN advance_payment INTEGER")
     if "payment_received_at" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN payment_received_at DATETIME")
+    if "payment_method" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN payment_method VARCHAR(40)")
+    if "mp_payment_id" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN mp_payment_id VARCHAR(80)")
+    if "mp_preference_id" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN mp_preference_id VARCHAR(80)")
+    if "total" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN total INTEGER")
+    if "items_json" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN items_json TEXT")
+    if "contact_phone" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN contact_phone VARCHAR(40)")
+    if "contact_email" not in order_columns:
+        statements.append("ALTER TABLE \"order\" ADD COLUMN contact_email VARCHAR(120)")
     # La referencia del panel admin vive en una columna distinta a product_image.
     if "reference_image" not in order_columns:
         statements.append("ALTER TABLE \"order\" ADD COLUMN reference_image VARCHAR(255)")
@@ -245,6 +263,16 @@ def ensure_runtime_schema():
     if inspector.has_table("user"):
         if "role" not in user_columns:
             statements.append("ALTER TABLE \"user\" ADD COLUMN role VARCHAR(30) NOT NULL DEFAULT 'tejedor'")
+        if "email" not in user_columns:
+            statements.append("ALTER TABLE \"user\" ADD COLUMN email VARCHAR(120)")
+        if "phone" not in user_columns:
+            statements.append("ALTER TABLE \"user\" ADD COLUMN phone VARCHAR(40)")
+        if "address" not in user_columns:
+            statements.append("ALTER TABLE \"user\" ADD COLUMN address VARCHAR(255)")
+        if "social_links" not in user_columns:
+            statements.append("ALTER TABLE \"user\" ADD COLUMN social_links TEXT")
+        if "photo_url" not in user_columns:
+            statements.append("ALTER TABLE \"user\" ADD COLUMN photo_url VARCHAR(255)")
 
     if inspector.has_table("customer"):
         if "created_at" not in customer_columns:

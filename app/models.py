@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from app import db
@@ -14,6 +15,24 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(200), nullable=False)
     # Rol del usuario: admin, transportista o tejedor.
     role = db.Column(db.String(30), nullable=False, default="tejedor", index=True)
+    # Datos para el perfil del tejedor / usuario
+    email = db.Column(db.String(120), nullable=True)
+    phone = db.Column(db.String(40), nullable=True)
+    address = db.Column(db.String(255), nullable=True)
+    social_links = db.Column(db.Text, nullable=True)
+    photo_url = db.Column(db.String(255), nullable=True)
+
+    def to_profile_dict(self):
+        return {
+            "id": self.id,
+            "username": self.username,
+            "role": self.role,
+            "email": self.email,
+            "phone": self.phone,
+            "address": self.address,
+            "social_links": json.loads(self.social_links or "[]"),
+            "photo_url": self.photo_url,
+        }
 
 
 class Product(db.Model):
@@ -144,8 +163,21 @@ class Order(db.Model):
     quote_max = db.Column(db.Integer, nullable=True)
     # Anticipo sugerido/calculado para confirmar la orden.
     advance_payment = db.Column(db.Integer, nullable=True)
-    # Estado del flujo (cotizacion, comprado, etc.).
+    # Estado del flujo (cotizacion, pendiente_pago, pagado, en_produccion, listo_envio, en_camino, entregado).
     status = db.Column(db.String(40), nullable=False, default="cotizacion", index=True)
+    # Método de pago seleccionado para esta orden.
+    payment_method = db.Column(db.String(40), nullable=True)
+    # Identificador del pago en Mercado Pago.
+    mp_payment_id = db.Column(db.String(80), nullable=True, index=True)
+    # Preferencia de Mercado Pago asociada a esta orden.
+    mp_preference_id = db.Column(db.String(80), nullable=True, index=True)
+    # Total de la orden en COP.
+    total = db.Column(db.Integer, nullable=True)
+    # Items de carrito almacenados en formato JSON
+    items_json = db.Column(db.Text, nullable=True)
+    # Contacto del cliente para la orden.
+    contact_phone = db.Column(db.String(40), nullable=True)
+    contact_email = db.Column(db.String(120), nullable=True)
     # Relacion inversa: cada orden pertenece a un cliente.
     customer = db.relationship("Customer", back_populates="orders")
 
@@ -153,6 +185,13 @@ class Order(db.Model):
     def to_dashboard_dict(self):
         # Usa nombre del cliente relacionado; si no existe, usa respaldo local.
         customer_name = self.customer.full_name if self.customer else (self.full_name or "Cliente sin nombre")
+        items = []
+        if self.items_json:
+            try:
+                items = json.loads(self.items_json)
+            except Exception:
+                items = []
+
         return {
             "id": self.id,
             "id_orden": self.id_orden,
@@ -172,14 +211,27 @@ class Order(db.Model):
             "length_cm": self.length_cm,
             "width_cm": self.width_cm,
             "product_image": self.product_image or self.reference_image,
-            # Se expone aparte para no mezclarla con la imagen original del pedido.
             "reference_image": self.reference_image,
+            "payment_method": self.payment_method,
+            "mp_payment_id": self.mp_payment_id,
+            "mp_preference_id": self.mp_preference_id,
+            "total": self.total,
+            "items": items,
+            "contact_phone": self.contact_phone,
+            "contact_email": self.contact_email,
         }
 
     # Diccionario para panel administrativo con campos extra.
     def to_admin_dict(self):
         # El panel admin necesita ambas imagenes: la del pedido y la referencia manual.
         customer_name = self.customer.full_name if self.customer else (self.full_name or "Cliente sin nombre")
+        items = []
+        if self.items_json:
+            try:
+                items = json.loads(self.items_json)
+            except Exception:
+                items = []
+
         return {
             "id": self.id,
             "id_orden": self.id_orden,
@@ -213,4 +265,11 @@ class Order(db.Model):
             "payment_proof": self.payment_proof,
             "weaver": self.assigned_to or "Sin asignar",
             "assigned": bool(self.assigned_to),
+            "payment_method": self.payment_method,
+            "mp_payment_id": self.mp_payment_id,
+            "mp_preference_id": self.mp_preference_id,
+            "total": self.total,
+            "items": items,
+            "contact_phone": self.contact_phone,
+            "contact_email": self.contact_email,
         }

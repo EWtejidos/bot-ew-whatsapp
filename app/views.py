@@ -1,6 +1,11 @@
+import json
 import logging  # Permite registrar errores, advertencias e información útil (logs)
 import os       # Manejo del sistema de archivos (rutas, carpetas, etc.)
+import re
 import uuid     # Genera identificadores únicos (muy útil para nombres de archivos)
+from datetime import datetime
+
+import requests
 
 # Importaciones principales de Flask para manejar rutas, requests y respuestas
 from flask import Blueprint, request, jsonify, current_app
@@ -16,7 +21,7 @@ from werkzeug.utils import secure_filename
 
 # Importaciones internas de tu proyecto (arquitectura modular)
 from app import db  # Instancia de la base de datos
-from .decorators.security import signature_required  # Decorador de seguridad (probablemente valida origen de requests)
+from .decorators.security import signature_required, validate_signature  # Decorador de seguridad y validación de firma
 from .models import Customer, Order, Product, User  # Modelos de base de datos (tablas)
 from .utils.whatsapp_utils import (
     process_whatsapp_message,  # Función que procesa lógica del bot
@@ -100,6 +105,169 @@ def delete_reference_image_file(relative_path):
     # Si el archivo existe, lo elimina
     if os.path.isfile(absolute_path):
         os.remove(absolute_path)
+
+
+def parse_product_id(product_id):
+    if product_id is None:
+        return None
+    match = re.search(r"(\d+)$", str(product_id))
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def generate_order_code():
+    return f"ORD-{uuid.uuid4().hex[:12].upper()}"
+
+
+def get_mp_access_token():
+    return os.getenv("MP_ACCESS_TOKEN")
+
+
+def get_mp_public_key():
+    return os.getenv("MP_PUBLIC_KEY")
+
+
+def get_mp_webhook_url():
+    webhook_url = os.getenv("MP_WEBHOOK_URL")
+    if webhook_url:
+        return webhook_url
+    if request:
+        return request.url_root.rstrip("/") + "/webhook"
+    return None
+
+
+def create_mercadopago_preference(order_info):
+    access_token = get_mp_access_token()
+    if not access_token:
+        raise ValueError("MP_ACCESS_TOKEN no configurado en el entorno.")
+
+    url = "https://api.mercadopago.com/checkout/preferences"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "items": [
+            {
+                "id": str(item["id"]),
+                "title": item["name"],
+                "quantity": item["quantity"],
+                "unit_price": item["price"],
+                "currency_id": "COP"
+            }
+            for item in order_info["items"]
+        ],
+        "external_reference": order_info["id_orden"],
+        "payer": {
+            "name": order_info["customer"]["full_name"],
+            "email": order_info["customer"].get("email") or "no-reply@ewtejidos.com",
+            "phone": {
+                "area_code": "57",
+                "number": str(order_info["customer"].get("phone") or "3000000000")[:20]
+            }
+        },
+        "payment_methods": {
+            "excluded_payment_types": [],
+            "excluded_payment_methods": []
+        },
+        "notification_url": get_mp_webhook_url(),
+        "back_urls": {
+            "success": "",
+            "failure": "",
+            "pending": ""
+        },
+        "auto_return": "approved"
+    }
+
+    response = requests.post(url, headers=headers, json=payload, timeout=15)
+    if response.status_code not in {200, 201}:
+        raise ValueError(f"Mercado Pago no pudo crear la preferencia: {response.status_code} {response.text}")
+
+    data = response.json()
+    preference_id = data.get("id")
+    if not preference_id:
+        raise ValueError("Mercado Pago retornó preferencia inválida.")
+
+    return preference_id
+
+
+def is_mercadopago_webhook(body):
+    if not isinstance(body, dict):
+        return False
+    if body.get("type") == "payment":
+        return True
+    data = body.get("data")
+    if isinstance(data, dict) and (data.get("id") or data.get("object")):
+        return True
+    return False
+
+
+def get_mp_payment_info(payment_id):
+    access_token = get_mp_access_token()
+    if not access_token:
+        raise ValueError("MP_ACCESS_TOKEN no configurado en el entorno.")
+
+    url = f"https://api.mercadopago.com/v1/payments/{payment_id}"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = requests.get(url, headers=headers, timeout=15)
+
+    if response.status_code != 200:
+        raise ValueError(f"No fue posible validar el pago en Mercado Pago: {response.status_code}")
+
+    return response.json()
+
+
+def find_order_by_mp_reference(payment_info, payment_id=None):
+    order = None
+    external_reference = payment_info.get("external_reference")
+    if external_reference:
+        order = Order.query.filter_by(id_orden=external_reference).first()
+    if not order and payment_id:
+        order = Order.query.filter_by(mp_payment_id=payment_id).first()
+    if not order:
+        preference_id = payment_info.get("preference_id") or payment_info.get("order", {}).get("external_reference")
+        order = Order.query.filter_by(mp_preference_id=preference_id).first() if preference_id else None
+    return order
+
+
+def handle_mercadopago_webhook(body):
+    data = body.get("data") or {}
+    payment_id = None
+    if isinstance(data, dict):
+        payment_id = data.get("id") or (data.get("object") or {}).get("id")
+    if not payment_id:
+        payment_id = body.get("id")
+
+    if not payment_id:
+        return jsonify({"status": "ignored", "message": "No se encontro identificador de pago."}), 400
+
+    try:
+        payment_info = get_mp_payment_info(payment_id)
+    except Exception as error:
+        logging.exception("Error consultando pago Mercado Pago %s", payment_id)
+        return jsonify({"status": "error", "message": str(error)}), 500
+
+    if payment_info.get("status") != "approved":
+        return jsonify({"status": "ignored", "message": "Pago no aprobado."}), 200
+
+    order = find_order_by_mp_reference(payment_info, payment_id)
+    if order is None:
+        logging.warning("No se encontro orden para pago Mercado Pago %s", payment_id)
+        return jsonify({"status": "ignored", "message": "Orden no encontrada."}), 200
+
+    try:
+        order.status = "pagado"
+        order.mp_payment_id = payment_id
+        order.payment_received_at = datetime.utcnow()
+        db.session.commit()
+    except Exception as error:
+        logging.exception("No se pudo actualizar la orden pagada %s", order.id)
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(error)}), 500
+
+    return jsonify({"status": "success", "order_id": order.id_orden}), 200
 
 
 def save_catalog_image(file_storage, owner_username):
@@ -201,8 +369,16 @@ def webhook_get():
     return verify()
 
 @webhook_blueprint.route("/webhook", methods=["POST"])
-@signature_required # Asegúrate de que APP_SECRET esté en el WSGI también
 def webhook_post():
+    body = request.get_json(silent=True) or {}
+
+    if is_mercadopago_webhook(body):
+        return handle_mercadopago_webhook(body)
+
+    signature = request.headers.get("X-Hub-Signature-256")
+    if not signature or not validate_signature(request.data, signature):
+        return jsonify({"status": "error", "message": "Invalid signature"}), 403
+
     return handle_message()
 
 
@@ -258,6 +434,161 @@ def create_admin_user():
     except Exception as error:
         db.session.rollback()
         return jsonify({"error": f"No fue posible crear el usuario: {error}"}), 500
+
+
+@webhook_blueprint.route("/api/users/me", methods=["GET", "PUT"])
+@login_required
+def user_profile():
+    if request.method == "GET":
+        return jsonify(current_user.to_profile_dict()), 200
+
+    payload = request.get_json(silent=True) or {}
+    current_user.email = payload.get("email", current_user.email)
+    current_user.phone = payload.get("phone", current_user.phone)
+    current_user.address = payload.get("address", current_user.address)
+    current_user.photo_url = payload.get("photo_url", current_user.photo_url)
+
+    if "social_links" in payload:
+        social_links = payload.get("social_links") or []
+        current_user.social_links = json.dumps(social_links) if isinstance(social_links, list) else json.dumps([])
+
+    try:
+        db.session.commit()
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible actualizar el perfil: {error}"}), 500
+
+    return jsonify(current_user.to_profile_dict()), 200
+
+
+@webhook_blueprint.route("/api/checkout", methods=["POST"])
+def create_checkout():
+    payload = request.get_json(silent=True) or {}
+    customer_data = payload.get("customer", {})
+    items = payload.get("items", [])
+    delivery = (payload.get("delivery") or payload.get("delivery_address") or "").strip()
+    total = payload.get("total")
+
+    if not customer_data.get("full_name"):
+        return jsonify({"error": "El nombre del cliente es requerido."}), 400
+    if not delivery:
+        return jsonify({"error": "La direccion de entrega es obligatoria."}), 400
+    if not items or not isinstance(items, list):
+        return jsonify({"error": "El carrito debe contener al menos un producto."}), 400
+    if total is None:
+        return jsonify({"error": "El total de la orden es requerido."}), 400
+
+    line_items = []
+    owner_usernames = set()
+
+    for item in items:
+        item_id = parse_product_id(item.get("id"))
+        if item_id is None:
+            return jsonify({"error": f"ID de producto invalido: {item.get('id')}"}), 400
+
+        product = Product.query.get(item_id)
+        if product is None:
+            return jsonify({"error": f"No se encontro el producto {item_id}."}), 404
+
+        quantity = int(item.get("quantity", 1))
+        unit_price = int(item.get("price", product.price))
+        if quantity <= 0 or unit_price < 0:
+            return jsonify({"error": "Cantidad o precio inválido."}), 400
+
+        owner_usernames.add(product.owner_username)
+        line_items.append({
+            "id": item_id,
+            "name": product.name,
+            "quantity": quantity,
+            "price": unit_price,
+        })
+
+    customer_wa_id = customer_data.get("email") or customer_data.get("phone") or f"web_{uuid.uuid4().hex[:12]}"
+    customer = Customer.query.filter_by(wa_id=customer_wa_id).first()
+    if customer is None:
+        customer = Customer(wa_id=customer_wa_id, full_name=customer_data.get("full_name"))
+        db.session.add(customer)
+        db.session.commit()
+    else:
+        customer.full_name = customer_data.get("full_name", customer.full_name)
+        db.session.commit()
+
+    order_code = generate_order_code()
+    assigned_to = ", ".join(sorted(owner_usernames)) if owner_usernames else None
+
+    order = Order(
+        id_orden=order_code,
+        customer_id=customer.id,
+        wa_id=customer_wa_id,
+        product_name=line_items[0]["name"] if line_items else None,
+        delivery=delivery,
+        contact_phone=customer_data.get("phone"),
+        contact_email=customer_data.get("email"),
+        total=int(total),
+        payment_method="mercadopago",
+        status="pendiente_pago",
+        items_json=json.dumps(line_items, ensure_ascii=False),
+        assigned_to=assigned_to,
+        full_name=customer.full_name,
+        date=datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+    )
+
+    try:
+        db.session.add(order)
+        db.session.commit()
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible crear la orden inicial: {error}"}), 500
+
+    try:
+        preference_id = create_mercadopago_preference({
+            "id_orden": order_code,
+            "customer": customer_data,
+            "items": line_items
+        })
+        order.mp_preference_id = preference_id
+        db.session.commit()
+    except Exception as error:
+        logging.exception("No fue posible crear la preferencia de pago para la orden %s", order_code)
+        return jsonify({"error": str(error)}), 500
+
+    public_key = get_mp_public_key()
+    return jsonify({"preference_id": preference_id, "public_key": public_key, "order_id": order_code}), 201
+
+
+@webhook_blueprint.route("/api/transport/orders", methods=["GET"])
+@login_required
+def transport_orders():
+    if current_user.role not in {"admin", "transportista"}:
+        return jsonify({"error": "No autorizado"}), 403
+
+    orders = Order.query.filter(Order.status.in_(["listo_envio", "en_camino", "entregado"]))
+    orders = orders.order_by(Order.created_at.desc()).all()
+    response = []
+
+    for order in orders:
+        pickup_address = None
+        weaver_name = None
+        if order.assigned_to:
+            weaver_name = order.assigned_to.split(",")[0].strip()
+            weaver = User.query.filter_by(username=weaver_name).first()
+            pickup_address = weaver.address if weaver else None
+
+        response.append({
+            "id": order.id,
+            "id_orden": order.id_orden,
+            "cliente": order.customer.full_name if order.customer else order.full_name,
+            "weaver": order.assigned_to,
+            "pickup_address": pickup_address,
+            "delivery_address": order.delivery,
+            "status": order.status,
+            "contact_phone": order.contact_phone,
+            "contact_email": order.contact_email,
+            "items": json.loads(order.items_json or "[]"),
+            "created_at": order.created_at.strftime("%d/%m/%Y %H:%M"),
+        })
+
+    return jsonify(response), 200
 
 
 @webhook_blueprint.route("/api/admin/orders", methods=["GET"])
