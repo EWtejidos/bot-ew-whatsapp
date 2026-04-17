@@ -60,17 +60,26 @@ def create_app():
     def checkout():
         return render_template('checkout.html')
 
+    @app.route('/payment_result')
+    def payment_result():
+        status = request.args.get('status', 'pending')
+        if status == 'success':
+            return render_template('payment_result.html', result='success', title='Pago aprobado', message='Tu pago fue aprobado y la orden está lista para gestión interna.')
+        if status == 'failure':
+            return render_template('payment_result.html', result='failure', title='Pago rechazado', message='El pago no se completó. Intenta nuevamente o contacta soporte.')
+        return render_template('payment_result.html', result='pending', title='Pago pendiente', message='Tu pago está en proceso. Verifica nuevamente dentro de unos minutos.')
+
     @app.route('/success')
     def payment_success():
-        return render_template('payment_result.html', result='success', title='Pago aprobado', message='Tu pago fue aprobado y la orden está lista para gestión interna.')
+        return redirect(url_for('payment_result', status='success'))
 
     @app.route('/failure')
     def payment_failure():
-        return render_template('payment_result.html', result='failure', title='Pago rechazado', message='El pago no se completó. Intenta nuevamente o contacta soporte.')
+        return redirect(url_for('payment_result', status='failure'))
 
     @app.route('/pending')
     def payment_pending():
-        return render_template('payment_result.html', result='pending', title='Pago pendiente', message='Tu pago está en proceso. Verifica nuevamente dentro de unos minutos.')
+        return redirect(url_for('payment_result', status='pending'))
 
     # Lógica del Login: Recibe los datos del formulario POST
     @app.route('/login', methods=['POST'])

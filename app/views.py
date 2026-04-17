@@ -164,9 +164,9 @@ def create_mercadopago_preference(order_info):
     if not base_url:
         raise ValueError("No se pudo determinar la URL base para Mercado Pago. Configure MP_BASE_URL o use una URL válida.")
 
-    success_url = f"{base_url}/success"
-    failure_url = f"{base_url}/failure"
-    pending_url = f"{base_url}/pending"
+    success_url = f"{base_url}/payment_result?status=success"
+    failure_url = f"{base_url}/payment_result?status=failure"
+    pending_url = f"{base_url}/payment_result?status=pending"
 
     if not (success_url.startswith("http://") or success_url.startswith("https://")):
         raise ValueError(f"La URL de éxito de Mercado Pago no es válida: {success_url}")
@@ -229,6 +229,10 @@ def create_mercadopago_preference(order_info):
         },
         "auto_return": "approved"
     }
+
+    logging.info("Mercado Pago preference payload: %s", json.dumps(payload, ensure_ascii=False))
+    logging.info("Mercado Pago back_urls success: %s", success_url)
+    print("Mercado Pago back_urls success:", success_url)
 
     logging.debug("Mercado Pago preference payload: %s", json.dumps(payload, ensure_ascii=False))
 
