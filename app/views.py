@@ -133,7 +133,8 @@ def get_mp_base_url():
     if base_url:
         return base_url.rstrip("/")
     if request:
-        return request.url_root.rstrip("/")
+        inferred = request.url_root or request.host_url
+        return inferred.rstrip("/") if inferred else None
     return None
 
 
@@ -142,7 +143,8 @@ def get_mp_webhook_url():
     if webhook_url:
         return webhook_url
     if request:
-        return request.url_root.rstrip("/") + "/webhook"
+        inferred = request.url_root or request.host_url
+        return inferred.rstrip("/") + "/webhook"
     return None
 
 
@@ -158,8 +160,16 @@ def create_mercadopago_preference(order_info):
     }
 
     base_url = order_info.get("base_url") or get_mp_base_url()
+    logging.debug("Mercado Pago base_url inicial: %s", base_url)
     if not base_url:
         raise ValueError("No se pudo determinar la URL base para Mercado Pago. Configure MP_BASE_URL o use una URL válida.")
+
+    success_url = f"{base_url}/success"
+    failure_url = f"{base_url}/failure"
+    pending_url = f"{base_url}/pending"
+
+    if not (success_url.startswith("http://") or success_url.startswith("https://")):
+        raise ValueError(f"La URL de éxito de Mercado Pago no es válida: {success_url}")
 
     cleaned_items = []
     for item in order_info["items"]:
@@ -213,9 +223,9 @@ def create_mercadopago_preference(order_info):
         },
         "notification_url": get_mp_webhook_url(),
         "back_urls": {
-            "success": f"{base_url}/success",
-            "failure": f"{base_url}/failure",
-            "pending": f"{base_url}/pending"
+            "success": success_url,
+            "failure": failure_url,
+            "pending": pending_url
         },
         "auto_return": "approved"
     }
