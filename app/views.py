@@ -244,10 +244,12 @@ def create_mercadopago_preference(order_info):
 
     data = response.json()
     preference_id = data.get("id")
+    init_point = data.get("init_point")
     if not preference_id:
         raise ValueError("Mercado Pago retornó preferencia inválida.")
 
-    return preference_id
+    logging.info("Mercado Pago init_point: %s", init_point)
+    return preference_id, init_point
 
 
 def is_mercadopago_webhook(body):
@@ -602,7 +604,7 @@ def create_checkout():
         return jsonify({"error": f"No fue posible crear la orden inicial: {error}"}), 500
 
     try:
-        preference_id = create_mercadopago_preference({
+        preference_id, init_point = create_mercadopago_preference({
             "id_orden": order_code,
             "customer": customer_data,
             "items": line_items,
@@ -615,7 +617,7 @@ def create_checkout():
         return jsonify({"error": str(error)}), 500
 
     public_key = get_mp_public_key()
-    return jsonify({"preference_id": preference_id, "public_key": public_key, "order_id": order_code}), 201
+    return jsonify({"preference_id": preference_id, "public_key": public_key, "init_point": init_point, "order_id": order_code}), 201
 
 
 @webhook_blueprint.route("/api/transport/orders", methods=["GET"])
