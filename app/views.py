@@ -161,24 +161,50 @@ def create_mercadopago_preference(order_info):
     if not base_url:
         raise ValueError("No se pudo determinar la URL base para Mercado Pago. Configure MP_BASE_URL o use una URL válida.")
 
+    cleaned_items = []
+    for item in order_info["items"]:
+        title = str(item.get("title") or item.get("name") or "").strip()
+        if not title:
+            raise ValueError("Cada item debe incluir un title válido.")
+
+        quantity = item.get("quantity")
+        try:
+            quantity = int(quantity)
+        except (TypeError, ValueError):
+            raise ValueError(f"Cantidad inválida para el item {title}: {quantity}")
+        if quantity <= 0:
+            raise ValueError(f"La cantidad debe ser mayor a cero para el item {title}.")
+
+        unit_price = item.get("price")
+        try:
+            unit_price = float(unit_price)
+        except (TypeError, ValueError):
+            raise ValueError(f"Precio inválido para el item {title}: {unit_price}")
+        if unit_price <= 0:
+            raise ValueError(f"El precio debe ser mayor a cero para el item {title}.")
+
+        cleaned_items.append({
+            "id": str(item.get("id") or title),
+            "title": title,
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "currency_id": "COP"
+        })
+
+    phone_raw = str(order_info["customer"].get("phone") or "").strip()
+    phone_digits = re.sub(r"\D", "", phone_raw)
+    if len(phone_digits) < 7:
+        phone_digits = "3000000000"
+
     payload = {
-        "items": [
-            {
-                "id": str(item["id"]),
-                "title": item["name"],
-                "quantity": item["quantity"],
-                "unit_price": item["price"],
-                "currency_id": "COP"
-            }
-            for item in order_info["items"]
-        ],
+        "items": cleaned_items,
         "external_reference": order_info["id_orden"],
         "payer": {
-            "name": order_info["customer"]["full_name"],
+            "name": str(order_info["customer"]["full_name"]).strip(),
             "email": order_info["customer"].get("email") or "no-reply@ewtejidos.com",
             "phone": {
                 "area_code": "57",
-                "number": str(order_info["customer"].get("phone") or "3000000000")[:20]
+                "number": phone_digits[:20]
             }
         },
         "payment_methods": {
@@ -194,7 +220,11 @@ def create_mercadopago_preference(order_info):
         "auto_return": "approved"
     }
 
+    logging.debug("Mercado Pago preference payload: %s", json.dumps(payload, ensure_ascii=False))
+
     response = requests.post(url, headers=headers, json=payload, timeout=15)
+    logging.debug("Mercado Pago response status: %s", response.status_code)
+    logging.debug("Mercado Pago response body: %s", response.text)
     if response.status_code not in {200, 201}:
         raise ValueError(f"Mercado Pago no pudo crear la preferencia: {response.status_code} {response.text}")
 
