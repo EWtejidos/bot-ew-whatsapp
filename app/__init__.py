@@ -18,7 +18,7 @@ def create_app():
     from .views import webhook_blueprint
 
     # Ruta absoluta hacia tu carpeta de archivos web (HTML/CSS/Images)
-    base_dir = '/home/ewtejidos/bot/web'
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'web'))
 
     app = Flask(__name__,
                 template_folder=base_dir,
@@ -52,6 +52,22 @@ def create_app():
     @app.route('/')
     def home():
         return render_template('index.html')
+
+    @app.route('/checkout')
+    def checkout():
+        return render_template('checkout.html')
+
+    @app.route('/success')
+    def payment_success():
+        return render_template('payment_result.html', result='success', title='Pago aprobado', message='Tu pago fue aprobado y la orden está lista para gestión interna.')
+
+    @app.route('/failure')
+    def payment_failure():
+        return render_template('payment_result.html', result='failure', title='Pago rechazado', message='El pago no se completó. Intenta nuevamente o contacta soporte.')
+
+    @app.route('/pending')
+    def payment_pending():
+        return render_template('payment_result.html', result='pending', title='Pago pendiente', message='Tu pago está en proceso. Verifica nuevamente dentro de unos minutos.')
 
     # Lógica del Login: Recibe los datos del formulario POST
     @app.route('/login', methods=['POST'])

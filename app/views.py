@@ -128,6 +128,15 @@ def get_mp_public_key():
     return os.getenv("MP_PUBLIC_KEY")
 
 
+def get_mp_base_url():
+    base_url = os.getenv("MP_BASE_URL")
+    if base_url:
+        return base_url.rstrip("/")
+    if request:
+        return request.url_root.rstrip("/")
+    return None
+
+
 def get_mp_webhook_url():
     webhook_url = os.getenv("MP_WEBHOOK_URL")
     if webhook_url:
@@ -147,6 +156,10 @@ def create_mercadopago_preference(order_info):
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
+
+    base_url = order_info.get("base_url") or get_mp_base_url()
+    if not base_url:
+        raise ValueError("No se pudo determinar la URL base para Mercado Pago. Configure MP_BASE_URL o use una URL válida.")
 
     payload = {
         "items": [
@@ -174,9 +187,9 @@ def create_mercadopago_preference(order_info):
         },
         "notification_url": get_mp_webhook_url(),
         "back_urls": {
-            "success": "",
-            "failure": "",
-            "pending": ""
+            "success": f"{base_url}/success",
+            "failure": f"{base_url}/failure",
+            "pending": f"{base_url}/pending"
         },
         "auto_return": "approved"
     }
@@ -471,6 +484,10 @@ def create_checkout():
 
     if not customer_data.get("full_name"):
         return jsonify({"error": "El nombre del cliente es requerido."}), 400
+    if not customer_data.get("email"):
+        return jsonify({"error": "El correo electronico del cliente es requerido."}), 400
+    if not customer_data.get("phone"):
+        return jsonify({"error": "El telefono de contacto es requerido."}), 400
     if not delivery:
         return jsonify({"error": "La direccion de entrega es obligatoria."}), 400
     if not items or not isinstance(items, list):
@@ -544,7 +561,8 @@ def create_checkout():
         preference_id = create_mercadopago_preference({
             "id_orden": order_code,
             "customer": customer_data,
-            "items": line_items
+            "items": line_items,
+            "base_url": request.url_root.rstrip("/")
         })
         order.mp_preference_id = preference_id
         db.session.commit()
