@@ -206,11 +206,18 @@ def create_mercadopago_preference(order_info):
     if len(phone_digits) < 7:
         phone_digits = "3000000000"
 
+    # Separar nombre completo en name y surname para Mercado Pago
+    full_name = str(order_info["customer"]["full_name"]).strip()
+    name_parts = full_name.split()
+    first_name = name_parts[0] if name_parts else ""
+    last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+
     payload = {
         "items": cleaned_items,
         "external_reference": order_info["id_orden"],
         "payer": {
-            "name": str(order_info["customer"]["full_name"]).strip(),
+            "name": first_name,
+            "surname": last_name,
             "email": order_info["customer"].get("email") or "no-reply@ewtejidos.com",
             "phone": {
                 "area_code": "57",
