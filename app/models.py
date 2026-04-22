@@ -35,6 +35,36 @@ class User(db.Model, UserMixin):
         }
 
 
+class Product(db.Model):
+    # Tabla para productos agregados por tejedores
+    id = db.Column(db.Integer, primary_key=True)
+    owner_username = db.Column(db.String(80), nullable=False, index=True)
+    name = db.Column(db.String(150), nullable=False)
+    category = db.Column(db.String(100), nullable=False)
+    price = db.Column(db.Integer, nullable=False)
+    image_path = db.Column(db.String(255), nullable=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "category": self.category,
+            "price": self.price,
+            "image_path": self.image_path,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class ProductosIds(db.Model):
     # Tabla para productos persistentes con información completa
     id = db.Column(db.Integer, primary_key=True)

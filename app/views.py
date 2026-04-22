@@ -22,7 +22,7 @@ from werkzeug.utils import secure_filename
 # Importaciones internas de tu proyecto (arquitectura modular)
 from app import db  # Instancia de la base de datos
 from .decorators.security import signature_required, validate_signature  # Decorador de seguridad y validación de firma
-from .models import Customer, Order, Product, ProductosIds, User  # Modelos de base de datos (tablas)
+from .models import Customer, Order, ProductosIds, User  # Modelos de base de datos (tablas)
 from .utils.whatsapp_utils import (
     process_whatsapp_message,  # Función que procesa lógica del bot
     is_valid_whatsapp_message, # Función que valida si el mensaje es real
