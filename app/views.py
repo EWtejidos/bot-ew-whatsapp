@@ -527,6 +527,36 @@ def user_profile():
     return jsonify(current_user.to_profile_dict()), 200
 
 
+@webhook_blueprint.route("/api/users/me/photo", methods=["POST"])
+@login_required
+def upload_user_photo():
+    # Validar que se envió archivo
+    if "photo" not in request.files:
+        return jsonify({"error": "No se envió archivo de foto"}), 400
+
+    file = request.files["photo"]
+    if file.filename == "":
+        return jsonify({"error": "El archivo está vacío"}), 400
+
+    try:
+        # Guardar la foto
+        photo_path = save_reference_image(file, f"user_{current_user.id}")
+        
+        # Actualizar la URL de foto en el modelo
+        current_user.photo_url = f"{request.url_root.rstrip('/')}/{photo_path}"
+        db.session.commit()
+        
+        return jsonify({
+            "photo_url": current_user.photo_url,
+            "message": "Foto cargada correctamente"
+        }), 200
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"Error al cargar la foto: {str(error)}"}), 500
+
+
 @webhook_blueprint.route("/api/checkout", methods=["POST"])
 def create_checkout():
     payload = request.get_json(silent=True) or {}
