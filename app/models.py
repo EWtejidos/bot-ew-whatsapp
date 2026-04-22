@@ -35,7 +35,8 @@ class User(db.Model, UserMixin):
         }
 
 
-class Product(db.Model):
+class ProductosIds(db.Model):
+    # Tabla para productos persistentes con información completa
     id = db.Column(db.Integer, primary_key=True)
     owner_username = db.Column(db.String(80), nullable=False, index=True)
     name = db.Column(db.String(150), nullable=False)
@@ -54,12 +55,12 @@ class Product(db.Model):
     def to_dict(self):
         return {
             "id": self.id,
-            "owner_username": self.owner_username,
-            "name": self.name,
-            "category": self.category,
-            "price": self.price,
-            "image_path": self.image_path,
-            "is_active": self.is_active,
+            "nombre": self.nombre,
+            "precio": self.precio,
+            "medidas": self.medidas,
+            "colores": self.colores,
+            "imagen": self.imagen,
+            "procedencia": self.procedencia,
         }
 
 

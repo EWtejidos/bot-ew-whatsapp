@@ -22,7 +22,7 @@ from werkzeug.utils import secure_filename
 # Importaciones internas de tu proyecto (arquitectura modular)
 from app import db  # Instancia de la base de datos
 from .decorators.security import signature_required, validate_signature  # Decorador de seguridad y validación de firma
-from .models import Customer, Order, Product, User  # Modelos de base de datos (tablas)
+from .models import Customer, Order, Product, ProductosIds, User  # Modelos de base de datos (tablas)
 from .utils.whatsapp_utils import (
     process_whatsapp_message,  # Función que procesa lógica del bot
     is_valid_whatsapp_message, # Función que valida si el mensaje es real
@@ -502,6 +502,110 @@ def create_admin_user():
         return jsonify({"error": f"No fue posible crear el usuario: {error}"}), 500
 
 
+@webhook_blueprint.route("/api/admin/productos-ids", methods=["GET"])
+@login_required
+def get_productos_ids():
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+
+    productos = ProductosIds.query.order_by(ProductosIds.created_at.desc()).all()
+    return jsonify([producto.to_dict() for producto in productos]), 200
+
+
+@webhook_blueprint.route("/api/admin/productos-ids", methods=["POST"])
+@login_required
+def create_producto_id():
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    nombre = (payload.get("nombre") or "").strip()
+    precio = payload.get("precio")
+    medidas = (payload.get("medidas") or "").strip()
+    colores = (payload.get("colores") or "").strip()
+    imagen = (payload.get("imagen") or "").strip()
+    procedencia = (payload.get("procedencia") or "tejedor").strip()
+
+    if not nombre or precio is None:
+        return jsonify({"error": "Nombre y precio son requeridos."}), 400
+
+    if procedencia not in {"tejedor", "clientes"}:
+        return jsonify({"error": "Procedencia debe ser 'tejedor' o 'clientes'."}), 400
+
+    try:
+        producto = ProductosIds(
+            nombre=nombre,
+            precio=int(precio),
+            medidas=medidas or None,
+            colores=colores or None,
+            imagen=imagen or None,
+            procedencia=procedencia,
+        )
+        db.session.add(producto)
+        db.session.commit()
+        return jsonify(producto.to_dict()), 201
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible crear el producto: {error}"}), 500
+
+
+@webhook_blueprint.route("/api/admin/productos-ids/<int:producto_id>", methods=["PUT"])
+@login_required
+def update_producto_id(producto_id):
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+
+    producto = ProductosIds.query.get(producto_id)
+    if producto is None:
+        return jsonify({"error": "Producto no encontrado."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    nombre = (payload.get("nombre") or producto.nombre).strip()
+    precio = payload.get("precio", producto.precio)
+    medidas = (payload.get("medidas") or producto.medidas or "").strip()
+    colores = (payload.get("colores") or producto.colores or "").strip()
+    imagen = (payload.get("imagen") or producto.imagen or "").strip()
+    procedencia = (payload.get("procedencia") or producto.procedencia).strip()
+
+    if not nombre or precio is None:
+        return jsonify({"error": "Nombre y precio son requeridos."}), 400
+
+    if procedencia not in {"tejedor", "clientes"}:
+        return jsonify({"error": "Procedencia debe ser 'tejedor' o 'clientes'."}), 400
+
+    try:
+        producto.nombre = nombre
+        producto.precio = int(precio)
+        producto.medidas = medidas or None
+        producto.colores = colores or None
+        producto.imagen = imagen or None
+        producto.procedencia = procedencia
+        db.session.commit()
+        return jsonify(producto.to_dict()), 200
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible actualizar el producto: {error}"}), 500
+
+
+@webhook_blueprint.route("/api/admin/productos-ids/<int:producto_id>", methods=["DELETE"])
+@login_required
+def delete_producto_id(producto_id):
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+
+    producto = ProductosIds.query.get(producto_id)
+    if producto is None:
+        return jsonify({"error": "Producto no encontrado."}), 404
+
+    try:
+        db.session.delete(producto)
+        db.session.commit()
+        return jsonify({"message": "Producto eliminado correctamente."}), 200
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible eliminar el producto: {error}"}), 500
+
+
 @webhook_blueprint.route("/api/users/me", methods=["GET", "PUT"])
 @login_required
 def user_profile():
@@ -602,6 +706,24 @@ def create_checkout():
             "quantity": quantity,
             "price": unit_price,
         })
+
+        # Verificar si el producto existe en ProductosIds, si no, agregarlo con procedencia 'tejedor'
+        existing_persistent = ProductosIds.query.filter_by(nombre=product.name).first()
+        if existing_persistent is None:
+            try:
+                persistent_product = ProductosIds(
+                    nombre=product.name,
+                    precio=unit_price,
+                    medidas=None,  # No tenemos medidas en Product
+                    colores=None,  # No tenemos colores en Product
+                    imagen=product.image_path,
+                    procedencia="tejedor",
+                )
+                db.session.add(persistent_product)
+                db.session.commit()
+            except Exception as error:
+                logging.warning(f"No fue posible agregar producto persistente {product.name}: {error}")
+                db.session.rollback()
 
     customer_wa_id = customer_data.get("email") or customer_data.get("phone") or f"web_{uuid.uuid4().hex[:12]}"
     customer = Customer.query.filter_by(wa_id=customer_wa_id).first()
@@ -1097,3 +1219,105 @@ def delete_order(order_id):
         return jsonify({"error": f"No fue posible eliminar la orden: {error}"}), 500
 
     return jsonify({"status": "success", "message": "Orden eliminada correctamente."}), 200
+
+
+@webhook_blueprint.route("/api/admin/productos-ids", methods=["GET"])
+@login_required
+def get_productos_ids():
+    # Obtener todos los productos persistentes para el admin panel
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+    
+    productos = ProductosIds.query.order_by(ProductosIds.created_at.desc()).all()
+    return jsonify([p.to_dict() for p in productos]), 200
+
+
+@webhook_blueprint.route("/api/admin/productos-ids", methods=["POST"])
+@login_required
+def create_producto_id():
+    # Crear un nuevo producto persistente
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+    
+    payload = request.get_json(silent=True) or {}
+    nombre = (payload.get("nombre") or "").strip()
+    precio = payload.get("precio")
+    medidas = (payload.get("medidas") or "").strip()
+    colores = (payload.get("colores") or "").strip()
+    imagen = (payload.get("imagen") or "").strip()
+    procedencia = (payload.get("procedencia") or "tejedor").strip()
+    
+    if not nombre or precio is None:
+        return jsonify({"error": "Nombre y precio son requeridos"}), 400
+    
+    try:
+        producto = ProductosIds(
+            nombre=nombre,
+            precio=int(precio),
+            medidas=medidas or None,
+            colores=colores or None,
+            imagen=imagen or None,
+            procedencia=procedencia
+        )
+        db.session.add(producto)
+        db.session.commit()
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible crear el producto: {error}"}), 500
+    
+    return jsonify(producto.to_dict()), 201
+
+
+@webhook_blueprint.route("/api/admin/productos-ids/<int:producto_id>", methods=["PUT"])
+@login_required
+def update_producto_id(producto_id):
+    # Editar un producto persistente
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+    
+    producto = ProductosIds.query.get(producto_id)
+    if producto is None:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    
+    payload = request.get_json(silent=True) or {}
+    nombre = (payload.get("nombre") or producto.nombre).strip()
+    precio = payload.get("precio", producto.precio)
+    medidas = (payload.get("medidas") or producto.medidas or "").strip()
+    colores = (payload.get("colores") or producto.colores or "").strip()
+    imagen = (payload.get("imagen") or producto.imagen or "").strip()
+    procedencia = (payload.get("procedencia") or producto.procedencia).strip()
+    
+    try:
+        producto.nombre = nombre
+        producto.precio = int(precio)
+        producto.medidas = medidas or None
+        producto.colores = colores or None
+        producto.imagen = imagen or None
+        producto.procedencia = procedencia
+        db.session.commit()
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible actualizar el producto: {error}"}), 500
+    
+    return jsonify(producto.to_dict()), 200
+
+
+@webhook_blueprint.route("/api/admin/productos-ids/<int:producto_id>", methods=["DELETE"])
+@login_required
+def delete_producto_id(producto_id):
+    # Eliminar un producto persistente
+    if current_user.role != 'admin':
+        return jsonify({"error": "No autorizado"}), 403
+    
+    producto = ProductosIds.query.get(producto_id)
+    if producto is None:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    
+    try:
+        db.session.delete(producto)
+        db.session.commit()
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({"error": f"No fue posible eliminar el producto: {error}"}), 500
+    
+    return jsonify({"status": "success", "message": "Producto eliminado correctamente"}), 200

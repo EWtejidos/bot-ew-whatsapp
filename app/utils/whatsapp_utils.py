@@ -5,7 +5,7 @@ import csv
 import secrets
 from datetime import datetime
 from app import db
-from app.models import Customer, Order
+from app.models import Customer, Order, ProductosIds
 from app.services.mood_service import detect_mood, build_mood_reply
 from app.services.precios import calcular_precio
 from app.services.email_service import send_order_email
